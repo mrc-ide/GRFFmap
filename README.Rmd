@@ -1,0 +1,8 @@
+---
+output: github_document
+---
+
+GRFFmap
+===================================================
+
+Prevalence mapping through Gaussian Random Fourier Features.

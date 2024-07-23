@@ -1,2 +1,6 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
+ignore/
+R_ignore/
+^README\.Rmd$
+LICENSE.md
