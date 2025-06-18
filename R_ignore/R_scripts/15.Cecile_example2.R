@@ -6,6 +6,8 @@ library(rstan)
 # ------------------------------------------------------------------------------------------------
 # SIMULATE DATA
 
+#set.seed(3)
+
 # parameters
 x_range <- c(-180, 180)
 y_range <- c(-90, 90)
@@ -13,8 +15,9 @@ t_range <- c(1, 100)
 nx <- 120
 ny <- 80
 length_space <- 50
-length_time <- 50
+length_time <- 100
 sill <- 2
+mu <- -2
 
 # simulate z values in space-time grid
 sim_grid <- sim_spacetime_spectral(x_range = x_range,
@@ -28,7 +31,7 @@ sim_grid <- sim_spacetime_spectral(x_range = x_range,
                                    y_buffer = 50,
                                    t_buffer = 50,
                                    sill = sill,
-                                   mu = -1)
+                                   mu = mu)
 
 # get into long form data.frame, and compute prevalence as logistic(z)
 df_sim_grid <- expand_grid(t = sim_grid$t,
@@ -48,10 +51,10 @@ df_sim_grid |>
   scale_fill_viridis_c(option = "magma", limits = c(0, 1))
 
 # simulate data from grid
-n_data <- 100
+n_data <- 200
 df_dat <- array_draw_data(sim_array = sim_grid,
                           n_data = n_data,
-                          N = 100)
+                          N = 50)
 
 # get distance between observations in space, time, and z-value
 data_dist <- get_data_dist(x = df_dat$x,
@@ -83,14 +86,14 @@ data_list <- list(
   k = df_dat$k,
   n_trials = df_dat$N,
   sill_shape = 1,
-  sill_rate = 1,
+  sill_rate = 0.1,
   mu_mean = 0,
-  mu_sd = 2
+  mu_sd = 3
 )
 
 # run stan model
 fit <- stan(
-  file = "R_ignore/R_scripts/stan/fixedlength_v2.stan",
+  file = "R_ignore/R_scripts/stan/fixedlength_v3.stan",
   data = data_list,
   iter = 1e3,
   chains = 1
@@ -98,20 +101,23 @@ fit <- stan(
 
 # extract MCMC samples
 draws <- extract(fit)
-n_draws <- length(draws$sill)
+n_draws <- nrow(draws$beta)
 
 beta_samples <- draws$beta
 sill_samples <- draws$sill
 mu_samples <- draws$mu
 
-hist(sill_samples, breaks = 50)
-hist(mu_samples, breaks = 50)
+hist(sill_samples, breaks = 100)
+abline(v = sill, lwd = 2, col = 2)
+
+hist(mu_samples, breaks = 100)
+abline(v = mu, lwd = 2, col = 2)
 
 # ------------------------------------------------
 
 # make feature maps for prediction
-X_pred <- expand_grid(y = sim_grid$y,
-                      x = sim_grid$x) |>
+X_pred <- expand.grid(x = sim_grid$x,
+                      y = sim_grid$y) |>
   as.matrix()
 
 l <- list()
@@ -142,7 +148,9 @@ for (i in seq_along(t_plot)) {
     bind_cols(pred_quant) |>
     mutate(MOE = `97.5%` - `2.5%`,
            p_pred = `50%`,
-           mask = (MOE > 10.25),
+           #mask = (MOE > 0.3), # mask based on total MOE
+           #mask = (`97.5%`/p_pred > 2) | (`2.5%`/p_pred < 0.5), # mask based on multiplicative prevalence
+           mask = (`97.5%` - p_pred) > 0.1 | (p_pred - `2.5%`) > 0.1, # mask based on absolute prevalence
            p_true = df_sim_grid |>
              filter(t == t_plot[i]) |>
              pull(p))
@@ -153,18 +161,26 @@ df_combined <- bind_rows(l)
 
 # produce plots
 df_masked <- df_combined |>
-  filter(mask == TRUE)
+  filter(mask == TRUE) |>
+  mutate(Type = factor("p_pred", levels = c("p_true", "p_pred")))
 dx <- diff(sim_array$x)[1]
 dy <- diff(sim_array$y)[1]
+
+t_eps <- 5
+df_dat_plot <- df_dat |>
+  expand_grid(t_plot = t_plot) |>
+  filter(t > (t_plot - t_eps) & t < (t_plot + t_eps)) |>
+  mutate(t = t_plot)
 
 df_combined |>
   select(x, y, t, p_pred, p_true) |>
   pivot_longer(cols = c(p_pred, p_true), names_to = "Type") |>
+  mutate(Type = factor(Type, levels = c("p_true", "p_pred"))) |>
   ggplot() + theme_bw() +
   geom_raster(aes(x = x, y = y, fill = value)) +
+  geom_tile(aes(x = x, y = y), width = dx, height = dy, fill = grey(0.5), alpha = 0.5, data = df_masked) +
+  geom_point(aes(x = x, y = y, fill = p_est), pch = 21, colour = grey(0.5), size = 2, data = df_dat_plot) +
   facet_grid(Type ~ t) +
   scale_fill_viridis_c(option = "magma", limits = c(0, 1)) +
-  #geom_tile(aes(x = x, y = y), width = dx, height = dy, fill = grey(0.5), alpha = 0.4, data = df_masked) +
-  #theme(legend.position = "none") +
   ggtitle("Inferred vs. True Prevalence")
 

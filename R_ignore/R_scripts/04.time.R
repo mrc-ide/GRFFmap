@@ -76,6 +76,11 @@ X_pred <- expand_grid(x = seq(0, 1, l = n_grid),
   as.matrix()
 
 t_pred <- 1
+t_eps <- 0.1
+
+dat_subset_time <- dat |>
+  filter(t > (t_pred - t_eps) & t < (t_pred + t_eps))
+
 t_vec <- rep(t_pred, nrow(X_pred))
 
 feat_pred <- cbind(cos(X_pred %*%t(omega) + t_vec %*% t(beta)),
@@ -93,4 +98,4 @@ X_pred |>
   geom_raster(aes(x = x, y = y, fill = plogis(pred))) +
   scale_fill_viridis_c(option = "magma", limits = c(0, 1)) +
   #geom_point(aes(x = x, y = y, fill = prev_true), pch = 21, col = grey(0.5), size = 4, data = dat)
-  geom_point(aes(x = x, y = y, fill = k / N), pch = 21, col = grey(0.5), size = 4, data = dat)
+  geom_point(aes(x = x, y = y, fill = k / N), pch = 21, col = grey(0.5), size = 4, data = dat_subset_time)

@@ -101,26 +101,28 @@ sim_spacetime_spectral <- function(x_range,
   nt_buffer <- nt + 2*t_buffer
   
   # define white noise array. All array dimensions are chosen to go x then y then t
-  m1_buffer <- sqrt(sill) * array(data = rnorm(nx_buffer * ny_buffer * nt_buffer),
+  m1_buffer <- array(data = rnorm(nx_buffer * ny_buffer * nt_buffer),
                      dim = c(nx_buffer, ny_buffer, nt_buffer))
   
   # define kernel arrays
   m2_x_buffer <- array(x_vec_buffer - mean(x_range), dim = c(nx_buffer, ny_buffer, nt_buffer))
-  m2_y_buffer <- aperm(array(y_vec_buffer - mean(y_range), dim = c(ny_buffer, nx_buffer, nt_buffer)), perm = c(2, 1, 3))
-  m2_t_buffer <- aperm(array(t_vec_buffer - mean(t_range), dim = c(nt_buffer, ny_buffer, nx_buffer)), perm = c(3, 2, 1))
+  m2_y_buffer <- aperm(array(y_vec_buffer - mean(y_range), dim = c(ny_buffer, nx_buffer, nt_buffer)),
+                       perm = c(2, 1, 3))
+  m2_t_buffer <- aperm(array(t_vec_buffer - mean(t_range), dim = c(nt_buffer, ny_buffer, nx_buffer)),
+                       perm = c(3, 2, 1))
   
   # calculate distance in space and time and compute kernel
   m2_dist_space <- sqrt(m2_x_buffer^2 + m2_y_buffer^2)
   m2_dist_time <- m2_t_buffer
   if (kernel_space_type == "RBF") {
-    m2_z_buffer <- exp(-0.5*(m2_dist_space / length_space)^2)
+    m2_z_buffer <- exp(- m2_dist_space^2 / (2 * length_space^2))
   } else if (kernel_space_type == "Exp") {
-    m2_z_buffer <- exp(-m2_dist_space / length_space)
+    m2_z_buffer <- exp(- m2_dist_space / length_space)
   }
   if (kernel_time_type == "RBF") {
-    m2_z_buffer <- m2_z_buffer * exp(-0.5*(m2_dist_time / length_time)^2)
+    m2_z_buffer <- m2_z_buffer * exp(- m2_dist_time^2 / (2 * length_time^2))
   } else if (kernel_time_type == "Exp") {
-    m2_z_buffer <- m2_z_buffer * exp(-m2_dist_time / length_time)
+    m2_z_buffer <- m2_z_buffer * exp(- m2_dist_time / length_time)
   }
   
   # perform convolution
@@ -129,8 +131,8 @@ sim_spacetime_spectral <- function(x_range,
   # discard buffer
   m3 <- m3_buffer[1:nx + x_buffer, 1:ny + y_buffer, 1:nt + t_buffer, drop = FALSE]
   
-  # apply mean
-  m3 <- m3 + mu
+  # apply sill and mean
+  m3 <- sqrt(sill) * m3 + mu
   
   # return list
   list(x = x_vec,
