@@ -4,20 +4,23 @@ data {
   matrix[N, 2*n_features] feat;
   int<lower=0> k[N];               // Observed successes
   int<lower=0> n_trials[N];        // Number of trials
-  real<lower=0> sill;
-  real<lower=0> mu_mean;
-  real<lower=0> mu_sd;
+  real mu_mean;
+  real mu_sd;
+  real<lower=0> sigma_shape;
+  real<lower=0> sigma_rate;
 }
 
 parameters {
   vector[2 * n_features] beta;
   real mu;
+  real<lower=0> sigma;
 }
 
 model {
   // Priors
-  beta ~ normal(0, sqrt(sill));
+  beta ~ normal(0, sigma);
   mu ~ normal(mu_mean, mu_sd);
+  sigma ~ gamma(sigma_shape, sigma_rate);
   
   // Likelihood
   k ~ binomial_logit(n_trials, mu + feat * beta);

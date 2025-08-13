@@ -15,9 +15,9 @@ t_range <- c(1, 100)
 nx <- 120
 ny <- 80
 length_space <- 50
-length_time <- 100
-sill <- 2
-mu <- -2
+length_time <- 20
+sill <- 4
+mu <- -5
 
 # simulate z values in space-time grid
 sim_grid <- sim_spacetime_spectral(x_range = x_range,
@@ -51,10 +51,10 @@ df_sim_grid |>
   scale_fill_viridis_c(option = "magma", limits = c(0, 1))
 
 # simulate data from grid
-n_data <- 200
+n_data <- 100
 df_dat <- array_draw_data(sim_array = sim_grid,
                           n_data = n_data,
-                          N = 50)
+                          N = 100)
 
 # get distance between observations in space, time, and z-value
 data_dist <- get_data_dist(x = df_dat$x,
@@ -65,18 +65,18 @@ data_dist <- get_data_dist(x = df_dat$x,
 # ------------------------------------------------
 
 # draw features
-n_features <- 50
+n_features <- 100
 omega_space <- rbind(rnorm(n_features),
                      rnorm(n_features))
 omega_time <- rbind(rnorm(n_features))
 
 # make feature maps
 X <- df_dat |>
-  select(x, y) |>
+  dplyr::select(x, y) |>
   as.matrix()
 
 feat <- cbind(cos(X %*% omega_space / length_space + df_dat$t %*% omega_time / length_time),
-              sin(X %*% omega_space / length_space + df_dat$t %*% omega_time / length_time)) / sqrt(n_features)
+              sin(X %*% omega_space / length_space + df_dat$t %*% omega_time / length_time)) * sqrt(1 / n_features)
 
 # prepare data list for Stan
 data_list <- list(
@@ -85,10 +85,9 @@ data_list <- list(
   feat = feat,
   k = df_dat$k,
   n_trials = df_dat$N,
-  sill_shape = 1,
-  sill_rate = 0.1,
+  sill = sill,
   mu_mean = 0,
-  mu_sd = 3
+  mu_sd = 10
 )
 
 # run stan model
@@ -104,7 +103,7 @@ draws <- extract(fit)
 n_draws <- nrow(draws$beta)
 
 beta_samples <- draws$beta
-sill_samples <- draws$sill
+sill_samples <- sill# draws$sill
 mu_samples <- draws$mu
 
 hist(sill_samples, breaks = 100)
@@ -173,12 +172,12 @@ df_dat_plot <- df_dat |>
   mutate(t = t_plot)
 
 df_combined |>
-  select(x, y, t, p_pred, p_true) |>
+  dplyr::select(x, y, t, p_pred, p_true) |>
   pivot_longer(cols = c(p_pred, p_true), names_to = "Type") |>
   mutate(Type = factor(Type, levels = c("p_true", "p_pred"))) |>
   ggplot() + theme_bw() +
   geom_raster(aes(x = x, y = y, fill = value)) +
-  geom_tile(aes(x = x, y = y), width = dx, height = dy, fill = grey(0.5), alpha = 0.5, data = df_masked) +
+  #geom_tile(aes(x = x, y = y), width = dx, height = dy, fill = grey(0.5), alpha = 0.5, data = df_masked) +
   geom_point(aes(x = x, y = y, fill = p_est), pch = 21, colour = grey(0.5), size = 2, data = df_dat_plot) +
   facet_grid(Type ~ t) +
   scale_fill_viridis_c(option = "magma", limits = c(0, 1)) +
