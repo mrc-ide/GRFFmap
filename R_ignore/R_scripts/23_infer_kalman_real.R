@@ -34,40 +34,16 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
   file.path(CACHE_DIR, fn)
 }
 
-# Returns theta_hat (length M): per-cell Pr{p > p_thr} estimated across draws
-exceed_prob_per_cell <- function(Pk, p_thr) {
-  Dk <- rowSums(!is.na(Pk))
-  succ <- rowSums(Pk > p_thr, na.rm = TRUE)
-  ifelse(Dk > 0, succ / Dk, NA_real_)
+# NA-robust row mean for 0/1 matrices
+.row_mean01 <- function(X01) {
+  Dk   <- rowSums(!is.na(X01))
+  succ <- rowSums(X01, na.rm = TRUE)
+  ifelse(Dk > 0L, succ / Dk, NA_real_)
 }
 
-# Point estimate unchanged
-frac_highconf_point <- function(Pk, p_thr, q_thr) {
-  X <- Pk > p_thr
-  Dk <- ncol(Pk) - rowSums(is.na(X))
-  X[is.na(X)] <- FALSE
-  p_hat <- ifelse(Dk > 0L, rowSums(X) / Dk, NA_real_)
-  mean(p_hat >= q_thr, na.rm = TRUE)
-}
-
-# Parametric bootstrap (fast)
-frac_highconf_boot <- function(Pk, p_thr, q_thr, B = 500) {
-  X  <- Pk > p_thr
-  Dk <- ncol(Pk) - rowSums(is.na(X))
-  X[is.na(X)] <- FALSE
-  p_hat <- ifelse(Dk > 0L, rowSums(X) / Dk, NA_real_)
-  
-  M <- length(p_hat)
-  out <- numeric(B)
-  for (b in 1:B) {
-    succ_b  <- rbinom(M, size = pmax(Dk, 0L), prob = pmin(pmax(p_hat, 0), 1))
-    theta_b <- succ_b / pmax(Dk, 1L)
-    out[b]  <- mean(theta_b >= q_thr, na.rm = TRUE)
-  }
-  
-  c(med = median(out, na.rm = TRUE),
-    lo  = as.numeric(quantile(out, 0.025, names = FALSE, na.rm = TRUE)),
-    hi  = as.numeric(quantile(out, 0.975, names = FALSE, na.rm = TRUE)))
+# Per-time exceedance from draws: Pk is [M x D] (M = nx*ny)
+exceed_prob_from_draws <- function(Pk, p_thr) {
+  .row_mean01(Pk > p_thr)  # length M
 }
 
 # --------------------------- Settings --------------------------------------
@@ -496,6 +472,7 @@ for (mut in all_who_mutations){
       
       # ---- Compute exceedance on the lon/lat grid for plot_times ----
       exceed_post_gaussian_approx <- array(NA, dim = c(nx, ny, length(plot_times)))
+      exceed_post_draw <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
       
       for (k in seq_along(plot_times)) {
         # ============================================================
@@ -523,28 +500,17 @@ for (mut in all_who_mutations){
         )
         
         exceed_post_gaussian_approx[, , k] <- matrix(exc_vec, nrow = nx, ncol = ny, byrow = FALSE)
+        
+        # ============================================================
+        # Exceedance probability: via draws
+        # ============================================================
+        Pk <- posterior_draws_list[[k]]            # [M x D] of prevalences from draws
+        theta_hat <- exceed_prob_from_draws(Pk, p_thresh)   # length M
+        exceed_post_draw[ , , k] <- matrix(theta_hat, nrow = nx, ncol = ny, byrow = FALSE)
       }
       
-      # ============================================================
-      # Exceedance probability: via draws
-      # ============================================================
-      ribbon_method <- "bootstrap"  # or "bootstrap" only (Beta version is for area counts)
-      exceed_post_draws <- lapply(seq_along(plot_times), function(k) {
-        Pk <- posterior_draws_list[[k]]
-        pt <- frac_highconf_point(Pk, p_thresh, q_thr)
-        rib <- frac_highconf_boot(Pk, p_thresh, q_thr, bootstrap)
-        tibble(
-          t        = plot_times[k],
-          frac_pt  = pt,
-          frac_med = rib[["med"]],
-          frac_lo  = rib[["lo"]],
-          frac_hi  = rib[["hi"]]
-        )
-      }) |> dplyr::bind_rows() |>
-        dplyr::mutate(exceedance_prob = p_thresh)
-      
       exceed_post_gaussian_approx_list[[count]] = exceed_post_gaussian_approx
-      exceed_post_draws_list[[count]] = exceed_post_draws
+      exceed_post_draws_list[[count]] = exceed_post_draw
       count = count + 1
     }
     
