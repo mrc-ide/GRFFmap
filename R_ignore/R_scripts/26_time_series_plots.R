@@ -16,6 +16,7 @@ library(devtools)
 library(dplyr)
 library(fs)
 library(here)
+library(ggrepel)
 
 # load_all()
 sf_use_s2(FALSE)
@@ -119,6 +120,19 @@ for (mut in all_who_mutations){
       title = paste("Annual Prevalence Trends by Country for", mut),
       subtitle = "Each line represents an Admin 1 region"
     ) +
+     geom_text_repel(data = (admin1_time_series_final %>%
+                              group_by(name_0, name_1) %>%
+                              slice_max(order_by = t, n = 1) %>%
+                              ungroup()),
+      aes(label = name_1),
+      color = "black",
+      hjust = 1,
+      nudge_x = 0.5,
+      size = 2.5,
+      show.legend = FALSE,
+      segment.color = "grey60",
+      max.overlaps = 10
+    ) +
     theme_bw() +
     theme(
       axis.text.x = element_text(angle = 45, hjust = 1),
@@ -126,9 +140,18 @@ for (mut in all_who_mutations){
     )
   save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "country_prev_draws")), annual_prev_plot_country, width = 10)
 
-  #Plot2: Addunal Prev plots by Country for prevalences > 1%
-  annual_prev_larger_1perc_plot_country <- admin1_time_series_final |> 
-    filter(admin1_time_series_final$name_1 %in% unique(admin1_time_series_final[admin1_time_series_final$mean_prevalence > 0.01 ,]$name_1)) |>
+  #Plot2: Addunal Prev plots by Country for prevalences > XX%
+  #filter out at this number 
+  prev_cutoff <- 0.05
+  #filter the data
+  select_districts <- admin1_time_series_final %>%
+    filter(mean_prevalence > prev_cutoff) %>%
+    distinct(name_0, name_1)
+  adm1_timeseries_bycountry_data <- admin1_time_series_final %>%
+    semi_join(select_districts, by = c("name_0", "name_1"))
+ 
+  #Plot with ADM1 labels
+  annual_prev_larger_1perc_plot_country <- adm1_timeseries_bycountry_data |>
     ggplot(aes(x = t, y = mean_prevalence, 
                group = id_1,
                color = name_0,
@@ -137,11 +160,26 @@ for (mut in all_who_mutations){
                 alpha = 0.10, 
                 linetype = "blank") +
     geom_line(linewidth = 0.7, alpha =1) +
+    geom_text_repel(
+      data = (admin1_time_series_final %>%
+                group_by(name_0, name_1) %>%
+                filter(mean_prevalence > prev_cutoff) %>%
+                slice_max(order_by = t, n = 1) %>%
+                ungroup()),
+      aes(label = name_1),
+      color = "black",
+      hjust = 1,
+      nudge_x = 0.5,
+      size = 2.5,
+      show.legend = FALSE,
+      segment.color = "grey60",
+      max.overlaps = 20
+    ) +
     facet_wrap(~ name_0, scales = "free_y") +
     labs(
       x = "Year", 
       y = "Mean Prevalence", 
-      title = paste("Annual Prevalence Trends by Country for", mut, "in ADM 1 where prev is > 0.01"),
+      title = paste("Annual Prevalence Trends by Country for", mut, "in ADM 1 where prev is >", prev_cutoff),
       subtitle = "Each line represents an Admin 1 region"
     ) +
     theme_bw() +
@@ -149,11 +187,11 @@ for (mut in all_who_mutations){
       axis.text.x = element_text(angle = 45, hjust = 1),
       legend.position = "none"
     )
-  save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "country_prev_larger_1perc_draws")), annual_prev_larger_1perc_plot_country, width = 10)
+  save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "country_prev_larger_", prev_cutoff, "_draws")), annual_prev_larger_1perc_plot_country, width = 10)
   
   #PLOTTING INDIVIDUAL Countries
-  ADM1greater01 <- unique(admin1_time_series_final[admin1_time_series_final$mean_prevalence >0.01 ,]$name_0)
-  admin = "Ethiopia" 
+  ADM1greater01 <- unique(admin1_time_series_final[admin1_time_series_final$mean_prevalence >prev_cutoff ,]$name_0)
+  #admin = "Ethiopia" 
   for (admin in ADM1greater01) {
     time_series_plot_admin <- admin1_time_series_final |> filter(admin == name_0) |>
       ggplot(aes(x = t, y = mean_prevalence, 
