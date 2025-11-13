@@ -17,8 +17,9 @@ library(dplyr)
 library(fs)
 library(here)
 library(ggrepel)
+library(ggplot2)
 
-# load_all()
+load_all()
 sf_use_s2(FALSE)
 set.seed(1)
 
@@ -113,7 +114,8 @@ for (mut in all_who_mutations){
                 alpha = 0.10, 
                 linetype = "blank") +
     geom_line(linewidth = 0.7, alpha =1) +
-    facet_wrap(~ name_0, scales = "free_y") +
+    facet_wrap(~ name_0) +
+    scale_y_continuous(limits = c(0, 1))+
     labs(
       x = "Year", 
       y = "Mean Prevalence", 
@@ -175,7 +177,8 @@ for (mut in all_who_mutations){
       segment.color = "grey60",
       max.overlaps = 20
     ) +
-    facet_wrap(~ name_0, scales = "free_y") +
+    facet_wrap(~ name_0) +
+    scale_y_continuous(limits = c(0, 1))+
     labs(
       x = "Year", 
       y = "Mean Prevalence", 
@@ -203,6 +206,7 @@ for (mut in all_who_mutations){
                   linetype = "blank") +
       geom_line(linewidth = 0.7, alpha =1) +
       facet_wrap(~ name_1) +
+      scale_y_continuous(limits = c(0, 1))+
       labs(
         x = "Year", 
         y = "Mean Prevalence", 
@@ -240,6 +244,7 @@ for (mut in all_who_mutations){
       geom_pointrange(aes(x = year, y = (prevalence/100), ymin = (prevalence_lower/100), ymax = (prevalence_upper/100)), data = coords_with_admin1) +
       geom_line(linewidth = 0.7, alpha =1) +
       facet_wrap(~ name_1) +
+      scale_y_continuous(limits = c(0, 1))+
       labs(
         x = "Year", 
         y = "Mean Prevalence", 
