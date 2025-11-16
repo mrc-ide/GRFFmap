@@ -163,8 +163,13 @@ df_combined <- bind_rows(l)
 df_masked <- df_combined |>
   filter(mask == TRUE) |>
   mutate(Type = factor("p_pred", levels = c("p_true", "p_pred")))
+<<<<<<< HEAD
 dx <- diff(sim_array$x)[1]
 dy <- diff(sim_array$y)[1]
+=======
+dx <- diff(sim_grid$x)[1]
+dy <- diff(sim_grid$y)[1]
+>>>>>>> grff_update_clean
 
 t_eps <- 5
 df_dat_plot <- df_dat |>
