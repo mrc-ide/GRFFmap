@@ -55,6 +55,28 @@ mask_to_africa <- function(df, africa_mask) {
   df
 }
 
+avg_2_year <- function(df){
+  # Create a “year block” variable
+  df <- df %>%
+    mutate(
+      year_block = case_when(
+        t %in% c(2012, 2013) ~ "2012-2013",
+        t %in% c(2014, 2015) ~ "2014-2015",
+        t %in% c(2016, 2017) ~ "2016-2017",
+        t %in% c(2018, 2019) ~ "2018-2019",
+        t %in% c(2020, 2021) ~ "2020-2021",
+        t %in% c(2022, 2023) ~ "2022-2023"
+      )
+    )
+  
+  # Average prevalence per pixel inside each 2-year block
+  avg_two_year <- df %>%
+    group_by(x, y, year_block) %>%
+    summarise(mean_p = mean(p, na.rm = TRUE), .groups = "drop")
+  
+  return(avg_two_year)
+}
+
 # --------------------------- Settings --------------------------------------
 # model parameters
 ell_km <- 80           # RFF length-scale in **kilometres**
@@ -82,19 +104,12 @@ t_win <- 2           # window around each facet time (years). Points within this
 # --------------------------- Load & filter data ----------------------------
 CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
 dir_create(CACHE_DIR)
-OUT_PREV_DIR   <- file.path("prev_prediction_grouped_year_kalman")
-OUT_PREV_DIR_LO_UP <- file.path("prev_prediction_grouped_year_kalman/upper_lower_prev")
-OUT_EXCEED_DIR <- file.path("exceedance_prob_grouped_year_kalman")
+OUT_PREV_DIR   <- file.path("prev_prediction_avg_2_year")
+# OUT_PREV_DIR_LO_UP <- file.path("prev_prediction_grouped_year/upper_lower_prev")
+OUT_EXCEED_DIR <- file.path("exceedance_prob_avg_2_year")
 
-OUT_PREV_DIR_DRAWS  <- file.path("prev_prediction_grouped_year_kalman_draws")
-OUT_PREV_DIR_LO_UP_DRAWS <- file.path("prev_prediction_grouped_year_kalman_draws/upper_lower_prev")
-OUT_EXCEED_DIR_DRAWS <- file.path("exceedance_prob_grouped_year_kalman_draws")
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_PREV_DIR), 
-             paste0("R_ignore/R_scripts/outputs/plots/", OUT_PREV_DIR_LO_UP),
-             paste0("R_ignore/R_scripts/outputs/plots/", OUT_EXCEED_DIR),
-             paste0("R_ignore/R_scripts/outputs/plots/", OUT_PREV_DIR_DRAWS), 
-             paste0("R_ignore/R_scripts/outputs/plots/", OUT_PREV_DIR_LO_UP_DRAWS),
-             paste0("R_ignore/R_scripts/outputs/plots/", OUT_EXCEED_DIR_DRAWS)), 
+             paste0("R_ignore/R_scripts/outputs/plots/", OUT_EXCEED_DIR)),
            recurse = TRUE)
 
 dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
@@ -159,9 +174,10 @@ pp_cols <- c(
 )
 
 pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 65))
-all_who_mutations = "k13:561:H"
 # --- Loop over each mutation ------------------------------
 for (mut in all_who_mutations){
+  clean_mut <- gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut)
+  
   if (mut == "k13:622:I"){
     prev_grid_threshold = 4.2
   }
@@ -170,6 +186,7 @@ for (mut in all_who_mutations){
   }
   else if(mut == "k13:comb"){
     prev_grid_threshold = 0
+    clean_mut = ""
   }
   else{
     prev_grid_threshold = 1
@@ -278,40 +295,34 @@ for (mut in all_who_mutations){
     # --- Build long data for lower / mean / upper ------------------------------
     cached <- make_or_load(mut, ell_km, tau2)
     
-    p_post_draws_lo <- cached$p_post_lower_draw
-    p_post_draws_hi <- cached$p_post_upper_draw
-    p_post_draws_mean <- cached$p_post_mean_draw
+    p_post_mean <- cached$p_post_mean_draw
     
     xs <- cached$xs
     ys <- cached$ys
-    exceed_prob_draws <- cached$exceed_post_draw_list
+    exceed_prob <- cached$exceed_post_draw_list
     
-    exceed_prob_draws_1 <- exceed_prob_draws$`1`
-    exceed_prob_draws_5 <- exceed_prob_draws$`5`
-    exceed_prob_draws_10 <- exceed_prob_draws$`10`
+    exceed_prob_1 <- exceed_prob$`1`
+    exceed_prob_5 <- exceed_prob$`5`
+    exceed_prob_10 <- exceed_prob$`10`
     
     # --- Build long data for lower / mean / upper ------------------------------
-    p_draws_long_lo   <- make_raster_long(p_post_draws_lo,   xs, ys, plot_times)
-    p_draws_long_mean <- make_raster_long(p_post_draws_mean, xs, ys, plot_times)
-    p_draws_long_hi   <- make_raster_long(p_post_draws_hi,   xs, ys, plot_times)
+    p_long_mean <- make_raster_long(p_post_mean, xs, ys, plot_times)
     
-    exceed_prob_draws_long_10 <- make_raster_long(exceed_prob_draws_10, xs, ys, plot_times)
-    exceed_prob_draws_long_5 <- make_raster_long(exceed_prob_draws_5, xs, ys, plot_times)
-    exceed_prob_draws_long_1 <- make_raster_long(exceed_prob_draws_1, xs, ys, plot_times)
+    exceed_prob_long_10 <- make_raster_long(exceed_prob_10, xs, ys, plot_times)
+    exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, plot_times)
+    exceed_prob_long_1 <- make_raster_long(exceed_prob_1, xs, ys, plot_times)
     
     # --- Mask out sea as white background ------------------------------
-    p_draws_long_mean <- mask_to_africa(p_draws_long_mean, africa_mask)
-    exceed_draws_probdraws_long_10 <- mask_to_africa(exceed_prob_draws_long_10, africa_mask)
-    exceed_prob_draws_long_5  <- mask_to_africa(exceed_prob_draws_long_5, africa_mask)
-    exceed_prob_draws_long_1  <- mask_to_africa(exceed_prob_draws_long_1, africa_mask) 
+    p_long_mean <- mask_to_africa(p_long_mean, africa_mask)
+    exceed_probdraws_long_10 <- mask_to_africa(exceed_prob_long_10, africa_mask)
+    exceed_prob_long_5  <- mask_to_africa(exceed_prob_long_5, africa_mask)
+    exceed_prob_long_1  <- mask_to_africa(exceed_prob_long_1, africa_mask) 
     
     # --- Crop dataframes to bbox ------------------------------
-    p_draws_long_lo     <- crop_long_df(p_draws_long_lo,     xlim, ylim)
-    p_draws_long_mean   <- crop_long_df(p_draws_long_mean,   xlim, ylim)
-    p_draws_long_hi     <- crop_long_df(p_draws_long_hi,     xlim, ylim)
-    exceed_prob_draws_long_10 <- crop_long_df(exceed_prob_draws_long_10, xlim, ylim)
-    exceed_prob_draws_long_5  <- crop_long_df(exceed_prob_draws_long_5,  xlim, ylim)
-    exceed_prob_draws_long_1  <- crop_long_df(exceed_prob_draws_long_1,  xlim, ylim)
+    p_long_mean   <- crop_long_df(p_long_mean,   xlim, ylim)
+    exceed_prob_long_10 <- crop_long_df(exceed_prob_long_10, xlim, ylim)
+    exceed_prob_long_5  <- crop_long_df(exceed_prob_long_5,  xlim, ylim)
+    exceed_prob_long_1  <- crop_long_df(exceed_prob_long_1,  xlim, ylim)
     
     # --- Create color plot ------------------------------
     points_df <- dat_sub %>%
@@ -319,7 +330,19 @@ for (mut in all_who_mutations){
       mutate(p_obs = numerator / denominator,
              t = factor(year, levels = plot_times)) %>%
       filter(longitude >= xlim[1], longitude <= xlim[2],
-             latitude  >= ylim[1], latitude  <= ylim[2])
+             latitude  >= ylim[1], latitude  <= ylim[2]) %>%
+      select(latitude, longitude, prevalence, year) %>%
+      rename(x = longitude,
+             y = latitude, 
+             t = year,
+             p = prevalence)
+    
+    # --- Average exceed prob and pred prev every two years --------------------
+    exceed_prob_long_1_avg_2y <- avg_2_year(exceed_prob_long_1)
+    exceed_prob_long_5_avg_2y <- avg_2_year(exceed_prob_long_5)
+    exceed_prob_long_10_avg_2y <- avg_2_year(exceed_prob_long_10)
+    points_df_avg_2y <- avg_2_year(points_df)
+    p_long_mean_avg_2y <- avg_2_year(p_long_mean)
     
     # --- Helper to generate a consistent ggplot with point overlays ------------
     plot_theme <- function(p) {
@@ -327,17 +350,18 @@ for (mut in all_who_mutations){
         strip.background = element_rect(fill = "white", color = NA),
         strip.text = element_text(color = "black", face = "plain"),
         panel.border = element_rect(color = "grey80", fill = NA),
-        legend.title = element_text(size = 12),
+        legend.title = element_text(size = 10),
         legend.text = element_text(size = 10),
-        title = element_text(size = 14),
+        title = element_text(size = 12),
         axis.text.x = element_text(size = 8, angle = 30, hjust = 1),  # <-- key tweak
-        axis.text.y = element_text(size = 8)
+        axis.text.y = element_text(size = 8),
+        plot.title = element_text(hjust = 0.5)
       )
     }
     
     plot_layer <- function(p_long_df, title_text, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = FALSE) {
       p <- ggplot() +
-        geom_raster(aes(x = x, y = y, fill = p*100), data = p_long_df) +
+        geom_raster(aes(x = x, y = y, fill = mean_p*100), data = p_long_df) +
         geom_sf(data = shp, linewidth = 0.2, fill = NA, color = "white") +
         geom_sf(data = shp_water, fill = "white", colour = NA) +
         coord_sf(
@@ -350,8 +374,8 @@ for (mut in all_who_mutations){
         )
       if (add_points) {
         p <- p + geom_point(
-          aes(x = longitude, y = latitude, fill = p_obs*100),
-          data = points_df %>% filter(t %in% plot_times) %>% arrange(p_obs),
+          aes(x = x, y = y, fill = mean_p),
+          data = points_df_avg_2y %>% arrange(mean_p),
           shape = 21, colour = "darkgrey", size = 1.5, stroke = 0.2
         )
       }
@@ -371,10 +395,10 @@ for (mut in all_who_mutations){
                                     name = "Prevalence (%)",
                                     breaks = seq(0, 65, by = 5),
                                     na.value = "white") +
-        facet_wrap(~ t, nrow = 1) +
+        facet_wrap(~year_block, nrow = 1) +
         labs(x = "Longitude", y = "Latitude")
       if (mut == "k13:561:H"){
-        p <- p + scale_x_continuous(breaks = seq(min(ep_long_df$x), max(p_long_df$x), by = 2))
+        p <- p + scale_x_continuous(breaks = seq(min(p_long_df$x), max(p_long_df$x), by = 2))
       }
       plot_theme(p)
     }
@@ -388,17 +412,10 @@ for (mut in all_who_mutations){
           ymin = ylim[1], ymax = ylim[2],
           fill = "white", colour = NA
         ) +
-        geom_raster(aes(x = x, y = y, fill = p*100), data = exceed_prob) +
+        geom_raster(aes(x = x, y = y, fill = mean_p*100), data = exceed_prob) +
         geom_sf(data = shape_Africa, linewidth = 0.2, fill = NA, color = "white") +
         geom_sf(data = shp_water, fill = "white", colour = NA) +
         coord_sf(xlim = xlim, ylim = ylim, expand = FALSE, crs = st_crs(4326)) +
-        # scale_fill_gradientn(
-        #   name   = legend_title,
-        #   limits = c(0, 100),
-        #   colours = c("#2b83ba", "#abdda4", "#fdae61", "#d7191c"),
-        #   values = rescale(c(0, 0.2, 0.8, 1)),  # Low–Mid–High emphasis
-        #   na.value = "white"
-        # ) +
         scale_fill_viridis_c(
           option = "mako",
           direction = 1,   # optional (flip palette)
@@ -407,7 +424,7 @@ for (mut in all_who_mutations){
           name = legend_title,
           na.value = "white"
         ) +
-        facet_wrap(~t, nrow = 1) +
+        facet_wrap(~year_block, nrow = 1) +
         labs(
           x = "Longitude",
           y = "Latitude"
@@ -418,40 +435,26 @@ for (mut in all_who_mutations){
         p <- p + labs(title = title_text)
       }
       if (mut == "k13:561:H"){
-        p <- p + scale_x_continuous(breaks = seq(min(exceed_prob$x), max(exceed_prob$x), by = 2))
+        p <- p + scale_x_continuous(breaks = seq(min(exceed_prob$x)+1, max(exceed_prob$x), by = 2))
       }
       plot_theme(p)
     }
     
     # --- Create and print the three separate plots -----------------------------
     
-    plot_mean_draws_no_title  <- plot_layer(p_draws_long_mean, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE)
-    
-    plot_mean_draws_no_title_no_points  <- plot_layer(p_draws_long_mean, "", shape_Africa, shape_water, add_points = FALSE, add_legend = TRUE)
-    
-    # plot_exceed_1 <- plot_exceedance(exceed_prob_long_1, title_text = "Exceedance Probability (Prevalence \u22651%)", legend_title ="Pr(prevalence \u22651%)")
-    # plot_exceed_5 <- plot_exceedance(exceed_prob_long_5, title_text = "Exceedance Probability (Prevalence \u22655%)", legend_title ="Pr(prevalence \u22655%)")
-    # plot_exceed_10 <- plot_exceedance(exceed_prob_long_10, title_text = "Exceedance Probability (Prevalence \u226510%)", legend_title ="Pr(prevalence \u226510%)")
-    
-    plot_exceed_draws_1_no_title <- plot_exceedance(exceed_prob_draws_long_1, title_text = "", legend_title =expression(Pr(Prevalence >= 1*"%")))
-    plot_exceed_draws_5_no_title <- plot_exceedance(exceed_prob_draws_long_5, title_text = "", legend_title =expression(Pr(Prevalence >= 5*"%")))
-    plot_exceed_draws_10_no_title <- plot_exceedance(exceed_prob_draws_long_10, title_text = "", legend_title =expression(Pr(Prevalence >= 10*"%")))
-    
-    #save_figs(file.path(OUT_PREV_DIR_LO_UP, paste0(mut, "_lower_perc_prev_no_title")), plot_lower_no_title, width = 10)
-    save_figs(file.path(OUT_PREV_DIR_DRAWS, paste0(mut, "_mean_perc_prev_no_title")), plot_mean_draws_no_title, width = 10)
-    #save_figs(file.path(OUT_PREV_DIR_LO_UP, paste0(mut, "_upper_perc_prev_no_title")), plot_upper_no_title, width = 10)
-    
-    #save_figs(file.path(OUT_PREV_DIR_LO_UP, paste0(mut, "_lower_perc_prev_no_title_no_points")), plot_lower_no_title_no_points, width = 10)
-    save_figs(file.path(OUT_PREV_DIR_DRAWS, paste0(mut, "_mean_perc_prev_no_title_no_points")), plot_mean_draws_no_title_no_points, width = 10)
-    #save_figs(file.path(OUT_PREV_DIR_LO_UP, paste0(mut, "_upper_perc_prev_no_title_no_points")), plot_upper_no_title_no_points, width = 10)
-    
-    # save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_1")), plot_exceed_1, width = 10)
-    # save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_5")), plot_exceed_5, width = 10)
-    # save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_10")), plot_exceed_10, width = 10)
-    
-    save_figs(file.path(OUT_EXCEED_DIR_DRAWS, paste0(mut, "_exceednace_prob_1_no_title")), plot_exceed_draws_1_no_title, width = 10)
-    save_figs(file.path(OUT_EXCEED_DIR_DRAWS, paste0(mut, "_exceednace_prob_5_no_title")), plot_exceed_draws_5_no_title, width = 10)
-    save_figs(file.path(OUT_EXCEED_DIR_DRAWS, paste0(mut, "_exceednace_prob_10_no_title")), plot_exceed_draws_10_no_title, width = 10)
+    plot_mean  <- plot_layer(p_long_mean_avg_2y, clean_mut, shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE)
+    plot_mean_no_points  <- plot_layer(p_long_mean_avg_2y, clean_mut, shape_Africa, shape_water, add_points = FALSE, add_legend = TRUE)
+
+    plot_exceed_1 <- plot_exceedance(exceed_prob_long_1_avg_2y, title_text = clean_mut, legend_title =expression(Pr(Prevalence >= 1*"%")))
+    plot_exceed_5 <- plot_exceedance(exceed_prob_long_5_avg_2y, title_text = clean_mut, legend_title =expression(Pr(Prevalence >= 5*"%")))
+    plot_exceed_10 <- plot_exceedance(exceed_prob_long_10_avg_2y, title_text = clean_mut, legend_title =expression(Pr(Prevalence >= 10*"%")))
+
+    save_figs(file.path(OUT_PREV_DIR, paste0(mut, "_mean_perc_prev_no_title")), plot_mean, width = 10)
+    save_figs(file.path(OUT_PREV_DIR, paste0(mut, "_mean_perc_prev_no_title")), plot_mean_no_points, width = 10)
+
+    save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_1")), plot_exceed_1, width = 10)
+    save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_5")), plot_exceed_5, width = 10)
+    save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_10")), plot_exceed_10, width = 10)
     
     print(paste0("Saved figures for ", mut)) 
   }
