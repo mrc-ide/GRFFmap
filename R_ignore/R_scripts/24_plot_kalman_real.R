@@ -159,7 +159,7 @@ pp_cols <- c(
 )
 
 pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 65))
-
+all_who_mutations = "k13:561:H"
 # --- Loop over each mutation ------------------------------
 for (mut in all_who_mutations){
   if (mut == "k13:622:I"){
@@ -215,8 +215,8 @@ for (mut in all_who_mutations){
       ylim = c(-4.60, 18)
     }
     else if (mut == "k13:561:H"){
-      xlim = c(28, 34)
-      ylim = c(-4, 2)
+      xlim = c(28, 32)
+      ylim = c(-3.4, -0.5)
     }
     
     # --- Crop Africa polygons ---------------
@@ -373,6 +373,9 @@ for (mut in all_who_mutations){
                                     na.value = "white") +
         facet_wrap(~ t, nrow = 1) +
         labs(x = "Longitude", y = "Latitude")
+      if (mut == "k13:561:H"){
+        p <- p + scale_x_continuous(breaks = seq(min(ep_long_df$x), max(p_long_df$x), by = 2))
+      }
       plot_theme(p)
     }
     
@@ -413,6 +416,9 @@ for (mut in all_who_mutations){
               legend.key.width = unit(2, "cm"))
       if (title_text != ""){
         p <- p + labs(title = title_text)
+      }
+      if (mut == "k13:561:H"){
+        p <- p + scale_x_continuous(breaks = seq(min(exceed_prob$x), max(exceed_prob$x), by = 2))
       }
       plot_theme(p)
     }
