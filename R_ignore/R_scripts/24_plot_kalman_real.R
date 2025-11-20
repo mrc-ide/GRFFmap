@@ -77,6 +77,22 @@ avg_2_year <- function(df){
   return(avg_two_year)
 }
 
+add_year_block <- function(df) {
+  df %>%
+    mutate(
+      year_block = case_when(
+        t %in% c(2012, 2013) ~ "2012-2013",
+        t %in% c(2014, 2015) ~ "2014-2015",
+        t %in% c(2016, 2017) ~ "2016-2017",
+        t %in% c(2018, 2019) ~ "2018-2019",
+        t %in% c(2020, 2021) ~ "2020-2021",
+        t %in% c(2022, 2023) ~ "2022-2023",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(!is.na(year_block))
+}
+
 # --------------------------- Settings --------------------------------------
 # model parameters
 ell_km <- 80           # RFF length-scale in **kilometres**
@@ -150,7 +166,7 @@ all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:4
                        "k13:543:T",  "k13:553:L",   "k13:561:H",   "k13:574:L",  "k13:580:Y",
                        "k13:441:L", "k13:449:A",   "k13:469:F",   "k13:481:V",
                        "k13:515:K", "k13:527:H",  "k13:537:I", "k13:537:D", "k13:538:V",  "k13:568:G")
-
+all_who_mutations <-  c("k13:comb", "k13:675:V", "k13:622:I", "k13:561:H")
 # Note for Cecile: the following mutations have a wide grid where prev > 0:
 # 441L, 449A, 469F, 473I, 539T, 553L, 561H, 568G, 574L, 622I
 
@@ -162,21 +178,23 @@ shape_Africa_ll <- shape_Africa |> sf::st_transform(CRS_LL)
 shape_water_ll  <- shape_water  |> sf::st_transform(CRS_LL)
 
 # --- Define color scheme ------------------------------
-pp_cols <- c(
-  "#5E3A9B",  # dark blue (0%)
+pp_cols<- c(
+  "#5E3A9B",  # dark purple (0)
   "#8cc4e0",  # medium-dark blue
-  "#a8ecbf",  # mint-teal (~5%)
-  "khaki2",   # 10
-  "#f3c86b",  # 20
-  "orange",   # 40
-  "red",       # 100
-  "darkred"
+  "#a8ecbf",  # mint-teal
+  "palegreen3", # <-- ADDED GREEN
+  "khaki2",
+  "#f3c86b",
+  "orange",
+  "hotpink",   # <-- ADDED PINK
+  "red",      
+  "darkred"    
 )
 
-pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 65))
+pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 70, 90, 95 , 100))
 # --- Loop over each mutation ------------------------------
 for (mut in all_who_mutations){
-  clean_mut <- gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut)
+  clean_mut <- paste0("k13 ", gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut))
   
   if (mut == "k13:622:I"){
     prev_grid_threshold = 4.2
@@ -225,15 +243,19 @@ for (mut in all_who_mutations){
     
     if (mut == "k13:675:V"){
       xlim = c(28, 37)
-      ylim = c(-4.60, 7)
+      ylim = c(-4, 5)
     }
     else if (mut == "k13:comb"){
       xlim = c(28, 48)
       ylim = c(-4.60, 18)
     }
+    else if (mut == "k13:622:I"){
+      xlim = c(32, 45)
+      ylim = c(4, 17)
+    }
     else if (mut == "k13:561:H"){
       xlim = c(28, 32)
-      ylim = c(-3.4, -0.5)
+      ylim = c(-4, 0)
     }
     
     # --- Crop Africa polygons ---------------
@@ -324,24 +346,27 @@ for (mut in all_who_mutations){
     exceed_prob_long_5  <- crop_long_df(exceed_prob_long_5,  xlim, ylim)
     exceed_prob_long_1  <- crop_long_df(exceed_prob_long_1,  xlim, ylim)
     
-    # --- Create color plot ------------------------------
+    # --- Create observed data points ------------------------------
     points_df <- dat_sub %>%
-      filter(year %in% plot_times) %>%
-      mutate(p_obs = numerator / denominator,
-             t = factor(year, levels = plot_times)) %>%
+      filter(year >= 2012, year <= 2023) %>%     # keep both years in each block
+      mutate(
+        p_obs = numerator / denominator,
+        t     = year
+      ) %>%
       filter(longitude >= xlim[1], longitude <= xlim[2],
-             latitude  >= ylim[1], latitude  <= ylim[2]) %>%
-      select(latitude, longitude, prevalence, year) %>%
-      rename(x = longitude,
-             y = latitude, 
-             t = year,
-             p = prevalence)
+             latitude  >= ylim[1],  latitude  <= ylim[2]) %>%
+      transmute(
+        x = longitude,
+        y = latitude,
+        t = t,
+        p = p_obs * 100   # or prevalence, but keep consistent with your color scale
+      )
     
     # --- Average exceed prob and pred prev every two years --------------------
     exceed_prob_long_1_avg_2y <- avg_2_year(exceed_prob_long_1)
     exceed_prob_long_5_avg_2y <- avg_2_year(exceed_prob_long_5)
     exceed_prob_long_10_avg_2y <- avg_2_year(exceed_prob_long_10)
-    points_df_avg_2y <- avg_2_year(points_df)
+    points_df_2y <- add_year_block(points_df)
     p_long_mean_avg_2y <- avg_2_year(p_long_mean)
     
     # --- Helper to generate a consistent ggplot with point overlays ------------
@@ -351,11 +376,14 @@ for (mut in all_who_mutations){
         strip.text = element_text(color = "black", face = "plain"),
         panel.border = element_rect(color = "grey80", fill = NA),
         legend.title = element_text(size = 10),
-        legend.text = element_text(size = 10),
+        legend.text = element_text(size = 8),
         title = element_text(size = 12),
-        axis.text.x = element_text(size = 8, angle = 30, hjust = 1),  # <-- key tweak
+        axis.text.x = element_text(size = 8, angle = 30, hjust = 1),
         axis.text.y = element_text(size = 8),
-        plot.title = element_text(hjust = 0.5)
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        plot.title = element_text(hjust = 0),
+        legend.justification = "center"
       )
     }
     
@@ -374,8 +402,8 @@ for (mut in all_who_mutations){
         )
       if (add_points) {
         p <- p + geom_point(
-          aes(x = x, y = y, fill = mean_p),
-          data = points_df_avg_2y %>% arrange(mean_p),
+          aes(x = x, y = y, fill = p),          # <- raw prevalence per point
+          data = points_df_2y %>% arrange(p),   # <- NOT averaged
           shape = 21, colour = "darkgrey", size = 1.5, stroke = 0.2
         )
       }
@@ -384,21 +412,22 @@ for (mut in all_who_mutations){
       }
       else{
         p <- p + theme(legend.position = "bottom",
-                       legend.key.width = unit(2, "cm"))
+                       legend.key.width = unit(2, "cm"),
+                       legend.key.height = unit(0.2, "cm"))
       }
       if (title_text != ""){
         p <- p + labs(title = title_text)
       }
       p <- p + scale_fill_gradientn(colours = pp_cols,
                                     values  = pp_vals,
-                                    limits = c(0, 70), 
+                                    limits = c(0, 100), 
                                     name = "Prevalence (%)",
-                                    breaks = seq(0, 65, by = 5),
+                                    breaks = seq(0, 100, by = 10),
                                     na.value = "white") +
         facet_wrap(~year_block, nrow = 1) +
         labs(x = "Longitude", y = "Latitude")
       if (mut == "k13:561:H"){
-        p <- p + scale_x_continuous(breaks = seq(min(p_long_df$x), max(p_long_df$x), by = 2))
+        p <- p + scale_x_continuous(breaks = seq(min(p_long_df$x)+1, max(p_long_df$x), by = 2))
       }
       plot_theme(p)
     }
@@ -430,7 +459,8 @@ for (mut in all_who_mutations){
           y = "Latitude"
         ) +
         theme(legend.position = "bottom",
-              legend.key.width = unit(2, "cm"))
+              legend.key.width = unit(2, "cm"),
+              legend.key.height = unit(0.2, "cm"))
       if (title_text != ""){
         p <- p + labs(title = title_text)
       }
@@ -449,8 +479,8 @@ for (mut in all_who_mutations){
     plot_exceed_5 <- plot_exceedance(exceed_prob_long_5_avg_2y, title_text = clean_mut, legend_title =expression(Pr(Prevalence >= 5*"%")))
     plot_exceed_10 <- plot_exceedance(exceed_prob_long_10_avg_2y, title_text = clean_mut, legend_title =expression(Pr(Prevalence >= 10*"%")))
 
-    save_figs(file.path(OUT_PREV_DIR, paste0(mut, "_mean_perc_prev_no_title")), plot_mean, width = 10)
-    save_figs(file.path(OUT_PREV_DIR, paste0(mut, "_mean_perc_prev_no_title")), plot_mean_no_points, width = 10)
+    save_figs(file.path(OUT_PREV_DIR, paste0(mut, "_mean_perc_prev")), plot_mean, width = 10)
+    save_figs(file.path(OUT_PREV_DIR, paste0(mut, "_mean_perc_prev_no_points")), plot_mean_no_points, width = 10)
 
     save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_1")), plot_exceed_1, width = 10)
     save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_5")), plot_exceed_5, width = 10)
