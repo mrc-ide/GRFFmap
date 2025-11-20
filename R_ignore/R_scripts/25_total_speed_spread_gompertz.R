@@ -16,8 +16,7 @@ load_all()
 # --- Paths & constants -----------------------------------------------------------
 CACHE_DIR      <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
 OUT_BASE       <- "GRFF_updated_maps"
-OUT_SPEED   <- file.path("speed_estimate")
-OUT_PLOT_DIR <- "total_speed_spread_gompertz"
+OUT_PLOT_DIR <- "total_speed_spread"
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_PLOT_DIR)))
 
 # --- Cache helpers -----------------------------------------------------------
@@ -112,7 +111,6 @@ all_who_mutations <- c(
   "k13:561:H",   "k13:574:L", "k13:580:Y", "k13:441:L", "k13:449:A", 
   "k13:469:F",   "k13:481:V", "k13:515:K", "k13:527:H",  "k13:537:I", 
   "k13:537:D", "k13:538:V",  "k13:568:G")
-
 area_ts_list <- list()
 for (mut in all_who_mutations){
   print(paste0("Processing ", mut, "........."))
@@ -184,351 +182,53 @@ for (mut in all_who_mutations){
       total_area_p5 = n_p5 * cell_area_km2,
       total_area_p10 = n_p10 * cell_area_km2,
       .groups = "drop"
-    )
-  
-  # Fit Nonlinear Least Squares (gompertz) regression
-  model_fits_exceed <- list()
-  min_t_per_thr_exceed <- list()
-  for (p_thr in c(0.01, 0.05, 0.10)) {
-    # Map threshold to column name
-    p_thr_col <- switch(as.character(p_thr),
-                        "0.01" = "total_area_p1",
-                        "0.05" = "total_area_p5",
-                        "0.1"  = "total_area_p10")
-    
-    # y vector for starting values
-    key <- as.character(p_thr)
-    y <- df_area_over_time_exceed[[p_thr_col]]
-    t_start <- min(df_area_over_time_exceed$t[is.finite(y)], na.rm = TRUE)
-    t_centered <- df_area_over_time_exceed$t - t_start
-    min_t_per_thr_exceed[[key]] <- t_start
-
-    A_max <- max(y, na.rm = TRUE)
-    df_tmp <- data.frame(t = df_area_over_time_exceed$t, t_centered = t_centered, y = y)
-    start_list_gomp <- list(
-      A  = max(df_tmp$y, na.rm = TRUE),   # asymptote ~ max area
-      B  = 0.1,                           # growth rate
-      t0 = median(df_tmp$t_centered, na.rm = TRUE)  # mid-time
-    )
-    
-    # Build formula: y(t_c) = A \exp\left(-\exp\left(-B\, (t_c - t_0)\right)\right).
-    fit_formula_gomp <- y ~ A * exp(-exp(-B * (t_centered - t0)))
-    
-    fit_gomp <- nls(
-      fit_formula_gomp,
-      data      = df_tmp,
-      start     = start_list_gomp,
-      algorithm = "port",
-      lower     = c(A = 0,   B = 0,   t0 = min(df_tmp$t_centered) - 5),
-      upper     = c(A = Inf, B = 10,  t0 = max(df_tmp$t_centered) + 5),
-      control   = nls.control(maxiter = 500, minFactor = 1e-10, warnOnly = TRUE)
-    )
-    
-    model_fits_exceed[[p_thr_col]] <- fit_gomp
-  }
-  
-  # Generate prediction points
-  df_area_over_time_exceed$t_centered <- df_area_over_time_exceed$t - min(df_area_over_time_exceed$t)
-  time_range <- seq(min(df_area_over_time_exceed$t_centered), max(df_area_over_time_exceed$t_centered), length.out = 100)
-
-  df_area_exceed_long <- df_area_over_time_exceed %>%
-    select(t, total_area_p1, total_area_p5, total_area_p10) %>%
-    pivot_longer(
-      cols      = starts_with("total_area_p"),
-      names_to  = "threshold",
-      values_to = "total_area"
     ) %>%
-    mutate(
-      threshold = recode(
-        threshold,
-        "total_area_p1"  = "p > 0.01",
-        "total_area_p5"  = "p > 0.05",
-        "total_area_p10" = "p > 0.10"
-      )
-    )
+    mutate(mutation = mut,
+           year = as.numeric(as.character(t)))
   
-  # Prediction from model fit
-  predictions_exceed_long <- imap_dfr(
-    model_fits_exceed,
-    ~ {
-      key <- .y      # "total_area_p1", "total_area_p5", "total_area_p10"
-      fit <- .x
-      
-      # which area column corresponds to this fit
-      y_col <- key
-      
-      # subset the relevant series for this threshold
-      series <- df_area_over_time_exceed %>%
-        select(t, !!sym(y_col)) %>%
-        filter(is.finite(.data[[y_col]]))
-      
-      # if no data, skip
-      if (nrow(series) == 0) {
-        return(tibble(
-          t        = numeric(0),
-          area_fit = numeric(0),
-          threshold = character(0)
-        ))
-      }
-      
-      # per-threshold time range
-      t_start <- min(series$t)
-      t_end   <- max(series$t)
-      
-      # sanity: both are length 1
-      # length(t_start); length(t_end)
-      
-      t_seq <- seq(t_start, t_end, length.out = 100)
-      
-      newdat <- data.frame(
-        t          = t_seq,
-        t_centered = t_seq - t_start
-      )
-      
-      area_fit <- as.numeric(predict(fit, newdata = newdat))
-      
-      # nice label for the legend
-      threshold_label <- dplyr::recode(
-        y_col,
-        "total_area_p1"  = "p > 0.01",
-        "total_area_p5"  = "p > 0.05",
-        "total_area_p10" = "p > 0.10",
-        .default = y_col
-      )
-      
-      tibble(
-        t        = t_seq,
-        area_fit = area_fit,
-        threshold = threshold_label
-      )
-    }
-  )
-  
-  model_fit_exceed_gompertz <- ggplot() +
-    # observed points + lines
-    geom_point(
-      data = df_area_exceed_long,
-      aes(x = t, y = total_area, color = threshold),
-      size = 1.5
-    ) +
-    geom_line(
-      data = df_area_exceed_long,
-      aes(x = t, y = total_area, color = threshold),
-      linewidth = 0.8
-    ) +
-    # fitted curves (dashed)
-    geom_line(
-      data = predictions_exceed_long,
-      aes(x = t, y = area_fit, color = threshold),
-      linewidth = 0.9,
-      linetype = "dashed"
-    ) +
-    labs(
-      x     = "Year",
-      y     = "Total high-risk area (km²)",
-      color = "Prevalence threshold",
-      title = "Total High-Risk Area Over Time Estimated From Exceedance Probabilities with Gompertz fit"
-    ) +
-    theme_bw() +
-    theme(
-      panel.border    = element_rect(color = "grey80", fill = NA),
-      legend.position = "bottom"
-    )
-  save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "_speed_spread_time_total_area_exceed_gompertz")), model_fit_exceed_gompertz, width = 10)
-  
-  # --- Area over time calculated from the prevalence draws ------------------
-  # Loop through all time points and draws to generate the uncertainty
-  area_draws <- list()
-  for (k in seq_along(plot_times)) {
-    draws_k <- posterior_draws[[k]] # [pixels x draws]
-    t_k <- plot_times[k]
-    
-    # For each draw (column), classify pixels and sum area
-    for (d in 1:D) {
-      # The 'p' for this specific draw d at time t_k (p_{i, t, d})
-      p_for_draw_d <- draws_k[, d]
-      
-      # For this specific draw, calculate the total area where p > tau
-      # The logic: 1. (p_for_draw_d > p_thr) converts to TRUE/FALSE (1/0)
-      #           2. sum() counts the number of exceeding pixels
-      area_for_draw_p1 <- sum(p_for_draw_d > 0.01) * cell_area_km2
-      area_for_draw_p5 <- sum(p_for_draw_d > 0.05) * cell_area_km2
-      area_for_draw_p10 <- sum(p_for_draw_d > 0.1) * cell_area_km2
-      
-      area_draws[[length(area_draws) + 1]] <- data.frame(
-        t = t_k,
-        draw = d,
-        area_p1 = area_for_draw_p1,
-        area_p5 = area_for_draw_p5,
-        area_p10 = area_for_draw_p10
-      )
-    }
-  }
-  
-  df_area_draws <- bind_rows(area_draws)
-  # Compute Quantiles for the Ribbon Plot
-  df_area_quantiles_draws <- df_area_draws %>%
-    group_by(t) %>%
-    summarise(
-      area_p1_mean = mean(area_p1),
-      area_p1_lower = quantile(area_p1, 0.025), # 2.5th percentile
-      area_p1_upper = quantile(area_p1, 0.975), # 97.5th percentile
-      area_p5_mean = mean(area_p5),
-      area_p5_lower = quantile(area_p5, 0.025), # 2.5th percentile
-      area_p5_upper = quantile(area_p5, 0.975), # 97.5th percentile
-      area_p10_mean = mean(area_p10),
-      area_p10_lower = quantile(area_p10, 0.025), # 2.5th percentile
-      area_p10_upper = quantile(area_p10 , 0.975), # 97.5th percentile
-      .groups = "drop"
-    )
-  
-  # Fit Nonlinear Least Squares (gompertz) regression
-  model_fits_draws <- list()
-  min_t_per_thr_draws <- list()
-  for (p_thr in c(0.01, 0.05, 0.10)) {
-    # Map threshold to column name
-    p_thr_col <- switch(as.character(p_thr),
-                        "0.01" = "area_p1_mean",
-                        "0.05" = "area_p5_mean",
-                        "0.1"  = "area_p10_mean")
-    key <- as.character(p_thr)
-    # y vector for starting values
-    y <- df_area_quantiles_draws[[p_thr_col]]
-    # per-threshold start year (first year with finite area)
-    t_start <- min(df_area_quantiles_draws$t[is.finite(y)], na.rm = TRUE)
-    t_centered <- df_area_quantiles_draws$t - t_start
-    min_t_per_thr_draws[[key]] <- t_start
-    
-    A_max <- max(y, na.rm = TRUE)
-    df_tmp <- data.frame(t = df_area_quantiles_draws$t, t_centered = t_centered, y = y)
-    start_list_gomp <- list(
-      A  = max(df_tmp$y, na.rm = TRUE),   # asymptote ~ max area
-      B  = 0.1,                           # growth rate
-      t0 = median(df_tmp$t_centered, na.rm = TRUE)  # mid-time
-    )
-    
-    # Build formula: y(t_c) = A \exp\left(-\exp\left(-B\, (t_c - t_0)\right)\right).
-    fit_formula_gomp <- y ~ A * exp(-exp(-B * (t_centered - t0)))
-    
-    fit_gomp <- nls(
-      fit_formula_gomp,
-      data      = df_tmp,
-      start     = start_list_gomp,
-      algorithm = "port",
-      lower     = c(A = 0,   B = 0,   t0 = min(df_tmp$t_centered) - 5),
-      upper     = c(A = Inf, B = 10,  t0 = max(df_tmp$t_centered) + 5),
-      control   = nls.control(maxiter = 500, minFactor = 1e-10, warnOnly = TRUE)
-    )
-    
-    model_fits_draws[[p_thr_col]] <- fit_gomp
-  }
-  
-  # Area over time long format
-  df_area_draws_long <- df_area_quantiles_draws %>%
-    # 1) Gather all area_* columns into long format
-    pivot_longer(
-      cols = starts_with("area_"),
-      names_to = c("thr_raw", "stat"),
-      names_pattern = "area_(p[0-9]+)_(mean|lower|upper)",
-      values_to = "area"
-    ) %>%
-    # 2) Make nice threshold labels
-    mutate(
-      threshold = dplyr::recode(
-        thr_raw,
-        "p1"  = "p > 0.01",
-        "p5"  = "p > 0.05",
-        "p10" = "p > 0.10"
-      )
-    ) %>%
-    select(t, threshold, stat, area) %>%
-    # 3) Spread mean / lower / upper back out as columns
-    pivot_wider(
-      names_from  = stat,
-      values_from = area,
-      names_prefix = "area_"  # gives area_mean, area_lower, area_upper
-    ) %>%
-    arrange(threshold, t)
-  
-  model_fits_draws_mean <- model_fits_draws[grepl("mean$", names(model_fits_draws))]
-  
-  predictions_draws_long <- imap_dfr(
-    model_fits_draws_mean,
-    ~ {
-      key <- .y
-      fit <- .x
-      y_col <- key
-      
-      series <- df_area_quantiles_draws %>%
-        dplyr::select(t, !!sym(y_col)) %>%
-        dplyr::filter(is.finite(.data[[y_col]]))
-      
-      if (nrow(series) == 0) {
-        return(tibble(t = numeric(0), area_fit = numeric(0),
-                      threshold = character(0), model = character(0)))
-      }
-      
-      t_start <- min(series$t)
-      t_end   <- max(series$t)
-      
-      t_seq <- seq(t_start, t_end, length.out = 100)
-      
-      newdat <- data.frame(
-        t          = t_seq,
-        t_centered = t_seq - t_start
-      )
-      
-      area_fit <- as.numeric(predict(fit, newdata = newdat))
-      
-      threshold_label <- dplyr::case_when(
-        grepl("p1_",  y_col) ~ "p > 0.01",
-        grepl("p5_",  y_col) ~ "p > 0.05",
-        grepl("p10_", y_col) ~ "p > 0.10",
-        TRUE                ~ y_col
-      )
-      
-      tibble(
-        t        = t_seq,
-        area_fit = area_fit,
-        threshold = threshold_label,
-        model     = key   # keep model name if you ever need it
-      )
-    }
-  )
-  
-  # Fitted curves in long format
-  model_fit_draws_gompertz <- ggplot() +
-    geom_ribbon(
-      data = df_area_draws_long,
-      aes(x = t, ymin = area_lower, ymax = area_upper, fill = threshold),
-      alpha = 0.2
-    ) +
-    geom_line(
-      data = df_area_draws_long,
-      aes(x = t, y = area_mean, color = threshold)
-    ) +
-    geom_line(
-      data = predictions_draws_long,
-      aes(
-        x = t,
-        y = area_fit,
-        color = threshold,
-        group = interaction(threshold, model) # 🔑 separate path per model
-      ),
-      linetype = "dashed"
-    ) +
-    labs(
-      x = "Year", y = "Total high-risk area (km²)",
-      color = "Prevalence threshold", fill = "Prevalence threshold",
-      title = "Total High-Risk Area Over Time Estimated From Posterior Draws with Gompertz fit"
-    ) +
-    theme_bw() +
-    theme(
-      panel.border    = element_rect(color = "grey80", fill = NA),
-      legend.position = "bottom"
-    )
-  
-  model_fit_draws_gompertz
-  save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "_speed_spread_time_total_area_draws_gompertz")), model_fit_draws_gompertz, width = 10)
-  
+  area_ts_list[[mut]] <- df_area_over_time_exceed
 }
+
+muts_of_interest <- names(area_ts_list)
+my_colors <- c(
+  "#332288","#117733","#44AA99","#88CCEE","#DDCC77",
+  "#CC6677","#882255","#AA4499","#DDDDDD","#000000",
+  "#E69F00","#56B4E9","#009E73","#F0E442","#0072B2",
+  "#D55E00","#CC79A7","#9A6324","#800000"
+)
+
+
+area_ts_all <- bind_rows(area_ts_list) %>%
+  filter(mutation %in% muts_of_interest) %>%
+  mutate(
+    mutation = factor(mutation, levels = muts_of_interest),
+    mutation_clean = mutation %>%
+      stringr::str_remove("^k13:") %>%
+      stringr::str_replace_all(":", ""),
+    
+    mutation_clean = case_when(
+      mutation == "k13:comb" ~ "k13 combined",
+      TRUE ~ mutation_clean
+    ))
+
+p_area_p5 <- ggplot(area_ts_all,
+                    aes(x = year, y = total_area_p5, color = mutation_clean)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = sort(unique(area_ts_all$year))) +
+  labs(
+    x = "Year",
+    y = expression("Area with Pr(prev > 5%) ≥ 80% (km"^2*")"),
+    color = "Mutation",
+    title = "Total high-prevalence area over time (5% prevalence threshold)"
+  ) +
+  scale_color_manual(values = my_colors) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+save_figs(file.path(OUT_PLOT_DIR , "all_mutatations_total_speed"), p_area_p5)
+saveRDS(area_ts_list, file.path("R_ignore/R_scripts/outputs/plots/", OUT_PLOT_DIR , "all_mutatations_total_speed.rds"))
+
