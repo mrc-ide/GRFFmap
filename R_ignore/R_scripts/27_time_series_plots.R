@@ -235,6 +235,7 @@ save_figs(file.path(OUT_PLOT_DIR, paste0("Fig5_combined_plot_", prev_cutoff, "_d
 save_figs(file.path(OUT_PLOT_DIR, paste0("Fig5_combined_plot_LARGE_", prev_cutoff, "_draws")), Fig5, width = 15, height = 15)
 
 
+
 #################PLOTTING INDIVIDUAL Countries with and without datapoints #####
 #CURRENTLY NOT SAVING ANYTHING FROM HERE
 ADM1greater01 <- unique(admin1_time_series_final[admin1_time_series_final$mean_prevalence >prev_cutoff ,]$name_0)
