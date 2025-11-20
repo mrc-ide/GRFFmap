@@ -79,7 +79,7 @@ admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
 #p_init and ell_km are below within the loop
 
 # inference parameters
-D        <- 300         # number of random frequencies (try 200–500)
+D        <- 500         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
@@ -88,14 +88,14 @@ jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 # prediction parameters
 nx <- 200
 ny <- 200
-t_vec <- 2002:2024
+t_vec <- 1995:2024
 t_num <- length(t_vec)
 
 # plotting parameters
-plot_times <- seq(2002, 2024, by = 1) # should be within t_vec
+plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
 
 # posterior draws
-n_post_draws <- 200
+n_post_draws <- 1000
 
 # parameters for exceedance plot
 cell_size_km <- 5
@@ -115,13 +115,13 @@ for (mut in all_who_mutations){
   if(mut == "mdr1C:86:N"){
     ell_km <- 500       # RFF length-scale in **kilometres** #80 for k13
     tau2   <- 0.1         # RW1 variance in feature space
-    p_init <- 0.3       #0.001 for k13
+    p_init <- 0.001       #0.001 for k13
     z_init <- qlogis(p_init)
   }
   if(mut == "crt:76:T"){
     ell_km <- 500       # RFF length-scale in **kilometres** #80 for k13
     tau2   <- 0.1         # RW1 variance in feature space
-    p_init <- 0.07       #0.001 for k13
+    p_init <- 0.001       #0.001 for k13
     z_init <- qlogis(p_init)
   }
   
