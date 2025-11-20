@@ -80,7 +80,7 @@ bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
 
-CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
@@ -98,13 +98,26 @@ africa_shp_admin1 <- st_transform(africa_shp_admin1, crs = target_crs)
 
 # Define East Africa box and crop Admin1 shapefile
 bbox_east_africa <- st_bbox(c(
-  xmin = 28.48,
-  xmax = 48.43,
+  xmin = 28,
+  xmax = 48,
   ymin = -4.6,
-  ymax = 15.29
+  ymax = 18
 ), crs = target_crs)
 
-# Using the cropped Admin 1 data for East Africa
+xlim <- c(bbox_east_africa["xmin"], bbox_east_africa["xmax"])
+ylim <- c(bbox_east_africa["ymin"], bbox_east_africa["ymax"])
+
+lon_min <- xlim[1] # bbox_east_africa["xmin"]
+lon_max <- xlim[2] # bbox_east_africa["xmax"]
+lat_min <- ylim[1] # bbox_east_africa["ymin"]
+lat_max <- ylim[2] # bbox_east_africa["ymax"]
+
+# Grid
+xs <- seq(lon_min, lon_max, length.out = nx)
+ys <- seq(lat_min, lat_max, length.out = ny)
+M <- nx * ny
+
+# Using the cropped st_bbox()# Using the cropped Admin 1 data for East Africa
 admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
 
 # --------------------------- Add K13 overall data ----------------------------
@@ -134,31 +147,26 @@ dat_with_k13 <- dat %>%
 
 # --------------------------- Define K13 mutants ----------------------------
 # which mutation we are focusing on
-all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:446:I", "k13:458:Y", "k13:476:I",   "k13:493:H",   "k13:539:T",
-                       "k13:543:T",  "k13:553:L",   "k13:561:H",   "k13:574:L",  "k13:580:Y",
-                       "k13:441:L", "k13:449:A",   "k13:469:F",   "k13:481:V",
+all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:561:H", "k13:469:Y", "k13:446:I", "k13:458:Y", "k13:476:I",   "k13:493:H",   "k13:539:T",
+                       "k13:543:T",  "k13:553:L", "k13:574:L",  "k13:580:Y",
+                       "k13:441:L", "k13:449:A", "k13:469:F",   "k13:481:V",
                        "k13:515:K", "k13:527:H",  "k13:537:I", "k13:537:D", "k13:538:V",  "k13:568:G")
-all_who_mutations = c("k13:675:V", "k13:622:I", "k13:561:H")
+
 for (mut in all_who_mutations){
   mut_t0 <- Sys.time()  # per-mutation clock start
-  
-  if (mut == "k13:622:I"){
-    prev_grid_threshold = 4.2
-  }
-  else if(mut %in% c("k13:469:F", "k13:561:H")){
-    prev_grid_threshold = 2
-  }
-  else if(mut == "k13:comb"){
-    prev_grid_threshold = 0
-  }
-  else{
-    prev_grid_threshold = 1
-  }
-  
+
   # --------------------------- Run spatiotemporal ----------------------------
   dat_sub <- dat_with_k13 |>
     filter(mutation == mut) |>
-    filter(is.finite(numerator), is.finite(denominator), denominator > 0)
+    filter(
+      is.finite(numerator),
+      is.finite(denominator),
+      denominator > 0,
+      longitude >= lon_min,
+      longitude <= lon_max,
+      latitude  >= lat_min,
+      latitude  <= lat_max
+    )
   
   # --------------------------- Project to local Cartesian (km) ---------------
   # Center projection on study area for good local properties
@@ -171,6 +179,13 @@ for (mut in all_who_mutations){
     " +lon_0=", lon0,
     " +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   )
+  
+  # Build lon/lat grid, then project to km for features
+  grid_ll <- expand.grid(lon = xs, lat = ys)
+  grid_sf <- st_as_sf(grid_ll, coords = c("lon", "lat"), crs = 4326)
+  grid_xy <- st_transform(grid_sf, crs_laea)
+  grid_m  <- st_coordinates(grid_xy)
+  grid_km <- grid_m / 1000
   
   # Make sf points and transform
   pts_ll <- st_as_sf(dat_sub, coords = c("longitude", "latitude"), crs = 4326)
@@ -198,52 +213,6 @@ for (mut in all_who_mutations){
   pts_pos <- dat_sub |> 
     dplyr::filter(prevalence > 0) 
   if (dim(pts_pos)[1] != 0){
-    buf_km   <- 500
-    bbox_poly <- pts_pos |>
-      sf::st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
-      sf::st_transform(3857) |>
-      sf::st_bbox() |> sf::st_as_sfc() |>
-      sf::st_buffer(buf_km * 1000) |>
-      sf::st_transform(4326)
-    
-    bb   <- sf::st_bbox(bbox_poly)
-    xlim <- c(bb["xmin"], bb["xmax"])
-    ylim <- c(bb["ymin"], bb["ymax"])
-    
-    if (mut == "k13:675:V"){
-      xlim = c(28, 37)
-      ylim = c(-4, 5)
-    }
-    else if (mut == "k13:comb"){
-      xlim = c(28, 48)
-      ylim = c(-4.60, 18)
-    }
-    else if (mut == "k13:622:I"){
-      xlim = c(32, 45)
-      ylim = c(4, 17)
-    }
-    else if (mut == "k13:561:H"){
-      xlim = c(28, 32)
-      ylim = c(-4, 0)
-    }
-    
-    lon_min <- xlim[1] # bb["xmin"]
-    lon_max <- xlim[2] # bb["xmax"]
-    lat_min <- ylim[1] # bb["ymin"]
-    lat_max <- ylim[2] # bb["ymax"]
-    
-    # Grid
-    xs <- seq(lon_min, lon_max, length.out = nx)
-    ys <- seq(lat_min, lat_max, length.out = ny)
-    M <- nx * ny
-    
-    # Build lon/lat grid, then project to km for features
-    grid_ll <- expand.grid(lon = xs, lat = ys)
-    grid_sf <- st_as_sf(grid_ll, coords = c("lon", "lat"), crs = 4326)
-    grid_xy <- st_transform(grid_sf, crs_laea)
-    grid_m  <- st_coordinates(grid_xy)
-    grid_km <- grid_m / 1000
-    
     # Φ on projected grid (km)
     OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
     Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
@@ -481,17 +450,14 @@ for (mut in all_who_mutations){
     
     # ---- Choose threshold(s) in prevalence units ---
     p_thresh_list <- c("10" = 0.10, "5" = 0.05, "1" = 0.01)
-    
-    # Calculate area km2 per cell
-    lat_mid <- (lat_min + lat_max) / 2
-    # 1 degree lat ≈ 111.32 km and 1 degree lon ≈ 111.32 * cos(latitude)
-    km_per_deg_lat <- 111.32
-    km_per_deg_lon <- 111.32 * cos(lat_mid * pi / 180)
-    dx_deg <- (lon_max - lon_min) / (nx - 1)  # cell width in degrees lon
-    dy_deg <- (lat_max - lat_min) / (ny - 1)  # cell height in degrees lat
-    dx_km <- dx_deg * km_per_deg_lon
-    dy_km <- dy_deg * km_per_deg_lat
-    cell_area_km2 <- dx_km * dy_km
+    # data frame of all coordinate pairs
+    grid_ll <- expand.grid(lon = xs, lat = ys)
+    # convert to polygon
+    cells_sf <- st_as_sf(grid_ll, coords = c("lon","lat"), crs = 4326) |>
+      st_transform(3857) |>
+      st_buffer(dist = half_m, endCapStyle = "SQUARE")
+    # computes the area of each cell polygon
+    cell_area_km2 <- as.numeric(units::set_units(st_area(cells_sf), "km^2"))
     
     # initalize list for exceedance prob based on Gaussian approx
     # exceed_post_gaussian_approx_list <- vector("list", length(p_thresh_list))

@@ -46,45 +46,13 @@ exceed_prob_from_draws <- function(Pk, p_thr) {
   .row_mean01(Pk > p_thr)  # length M
 }
 
-# --------------------------- Settings --------------------------------------
-# model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1         # RW1 variance in feature space
-p_init <- 0.001
-z_init <- qlogis(p_init)
-
-# inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
-max_iter <- 5           # EM iterations
-z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
-omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
-jitter_S <- 1e-10       # diagonal jitter for innovation covariance
-
-# prediction parameters
-nx <- 200
-ny <- 200
-t_vec <- 2012:2025
-t_num <- length(t_vec)
-
-# plotting parameters
-plot_times <- seq(2014, 2025, by = 1) # should be within t_vec
-
-# posterior draws
-n_post_draws <- 1000
-
-# parameters for exceedance plot
-cell_size_km <- 5
-half_m <- (cell_size_km * 1000) / 2
-q_thr <- 0.80   # “high-confidence” threshold on per-cell exceed prob
-bootstrap    <- 500    # bootstrap resamples
-
 # --------------------------- Load & filter data ----------------------------
 
-CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_PDcache_annual_2002_2024"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/partner_drug_calc_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
   select(longitude, latitude, year, numerator, denominator, prevalence, mutation)
 
@@ -106,57 +74,59 @@ bbox_east_africa <- st_bbox(c(
 
 # Using the cropped Admin 1 data for East Africa
 admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
+# --------------------------- Settings --------------------------------------
 
-# --------------------------- Add K13 overall data ----------------------------
-k13_any_site_year <- dat %>%
-  # keep only K13 mutations; adjust this filter to your naming convention
-  filter(grepl("^k13", mutation, ignore.case = TRUE)) %>%
-  group_by(year, longitude, latitude) %>%
-  summarise(
-    numerator = sum(numerator, na.rm = TRUE),
-    denominator = max(denominator, na.rm = TRUE),
-    prevalence = numerator / denominator *100,
-    .groups = "drop"
-  ) %>%
-  transmute(
-    year,
-    longitude = longitude,
-    latitude  = latitude,
-    mutation  = "k13:comb", 
-    numerator = numerator,
-    denominator = denominator,
-    prevalence = prevalence
-  )
+#p_init and ell_km are below within the loop
 
-dat_with_k13 <- dat %>%
-  bind_rows(k13_any_site_year) %>%
-  arrange(year, longitude, latitude, mutation)
+# inference parameters
+D        <- 500         # number of random frequencies (try 200–500)
+max_iter <- 5           # EM iterations
+z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
+omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
+jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
-# --------------------------- Define K13 mutants ----------------------------
+# prediction parameters
+nx <- 200
+ny <- 200
+t_vec <- 1995:2024
+t_num <- length(t_vec)
+
+# plotting parameters
+plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
+
+# posterior draws
+n_post_draws <- 1000
+
+# parameters for exceedance plot
+cell_size_km <- 5
+half_m <- (cell_size_km * 1000) / 2
+q_thr <- 0.80   # “high-confidence” threshold on per-cell exceed prob
+bootstrap    <- 500    # bootstrap resamples
+
+
+# --------------------------- Define PD mutants ----------------------------
 # which mutation we are focusing on
-all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:446:I", "k13:458:Y", "k13:476:I",   "k13:493:H",   "k13:539:T",
-                       "k13:543:T",  "k13:553:L",   "k13:561:H",   "k13:574:L",  "k13:580:Y",
-                       "k13:441:L", "k13:449:A",   "k13:469:F",   "k13:481:V",
-                       "k13:515:K", "k13:527:H",  "k13:537:I", "k13:537:D", "k13:538:V",  "k13:568:G")
-all_who_mutations = c("k13:675:V", "k13:622:I", "k13:561:H")
+all_who_mutations <- c("mdr1C:86:N", "crt:76:T")
+
 for (mut in all_who_mutations){
   mut_t0 <- Sys.time()  # per-mutation clock start
-  
-  if (mut == "k13:622:I"){
-    prev_grid_threshold = 4.2
+  # --------------------------- Settings (cont.) --------------------------------------
+  # model parameters
+  if(mut == "mdr1C:86:N"){
+    ell_km <- 500       # RFF length-scale in **kilometres** #80 for k13
+    tau2   <- 0.1         # RW1 variance in feature space
+    p_init <- 0.001       #0.001 for k13
+    z_init <- qlogis(p_init)
   }
-  else if(mut %in% c("k13:469:F", "k13:561:H")){
-    prev_grid_threshold = 2
-  }
-  else if(mut == "k13:comb"){
-    prev_grid_threshold = 0
-  }
-  else{
-    prev_grid_threshold = 1
+  if(mut == "crt:76:T"){
+    ell_km <- 500       # RFF length-scale in **kilometres** #80 for k13
+    tau2   <- 0.1         # RW1 variance in feature space
+    p_init <- 0.001       #0.001 for k13
+    z_init <- qlogis(p_init)
   }
   
   # --------------------------- Run spatiotemporal ----------------------------
-  dat_sub <- dat_with_k13 |>
+  dat_sub <- dat |>
     filter(mutation == mut) |>
     filter(is.finite(numerator), is.finite(denominator), denominator > 0)
   
@@ -196,7 +166,7 @@ for (mut in all_who_mutations){
   
   # Bounding box in lon/lat (pad so raster isn't clipped)
   pts_pos <- dat_sub |> 
-    dplyr::filter(prevalence > 0) 
+    dplyr::filter(prevalence > 0) ##@NWY - why filter out zeros here
   if (dim(pts_pos)[1] != 0){
     buf_km   <- 500
     bbox_poly <- pts_pos |>
@@ -209,23 +179,6 @@ for (mut in all_who_mutations){
     bb   <- sf::st_bbox(bbox_poly)
     xlim <- c(bb["xmin"], bb["xmax"])
     ylim <- c(bb["ymin"], bb["ymax"])
-    
-    if (mut == "k13:675:V"){
-      xlim = c(28, 37)
-      ylim = c(-4, 5)
-    }
-    else if (mut == "k13:comb"){
-      xlim = c(28, 48)
-      ylim = c(-4.60, 18)
-    }
-    else if (mut == "k13:622:I"){
-      xlim = c(32, 45)
-      ylim = c(4, 17)
-    }
-    else if (mut == "k13:561:H"){
-      xlim = c(28, 32)
-      ylim = c(-4, 0)
-    }
     
     lon_min <- xlim[1] # bb["xmin"]
     lon_max <- xlim[2] # bb["xmax"]
@@ -421,7 +374,7 @@ for (mut in all_who_mutations){
       # p_mean_vec <- plogis(z_mean_vec)
       # p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
       # p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
-      
+      # 
       # Posterior draws
       message(sprintf("Time Series Draws: %d ", n_post_draws))
       L_t <- chol(P_t)
@@ -437,10 +390,10 @@ for (mut in all_who_mutations){
       
       # Store as [nx x ny]
       z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-      # p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+      #p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
       z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      # p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      # p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      #p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      #p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
       p_post_mean_draw[, , k] <- matrix(p_mean_exact, nx, ny, byrow = FALSE)
       p_post_lo_draw[,   , k] <- matrix(p_lo_exact,   nx, ny, byrow = FALSE)
       p_post_hi_draw[,   , k] <- matrix(p_hi_exact,   nx, ny, byrow = FALSE)
@@ -478,9 +431,28 @@ for (mut in all_who_mutations){
     # ============================================================
     # Exceedance probability surface: Pr{ p(s,t) > p_thresh }
     # ============================================================
+    # 
+    # # ---- Choose threshold(s) in prevalence units ---
+    # p_thresh_list <- c("10" = 0.10, "5" = 0.05, "1" = 0.01)
+    # # data frame of all coordinate pairs
+    # grid_ll <- expand.grid(lon = xs, lat = ys)
+    # # convert to polygon
+    # cells_sf <- st_as_sf(grid_ll, coords = c("lon","lat"), crs = 4326) |>
+    #   st_transform(3857) |>
+    #   st_buffer(dist = half_m, endCapStyle = "SQUARE")
+    # # computes the area of each cell polygon
+    # cell_area_km2 <- as.numeric(units::set_units(st_area(cells_sf), "km^2"))
+    # 
+    # # initalize list for exceedance prob based on Gaussian approx
+    # exceed_post_gaussian_approx_list <- vector("list", length(p_thresh_list))
+    # names(exceed_post_gaussian_approx_list) <- names(p_thresh_list)
+    # # initalize list for exceedance prob based on draws
+    # exceed_post_draws_list <- vector("list", length(p_thresh_list))
+    # names(exceed_post_draws_list) <- names(p_thresh_list)
+    # 
     
     # ---- Choose threshold(s) in prevalence units ---
-    p_thresh_list <- c("10" = 0.10, "5" = 0.05, "1" = 0.01)
+    p_thresh_list <- c("50" = 0.5, "20" = 0.2 ,"10" = 0.10, "5" = 0.05, "1" = 0.01)
     
     # Calculate area km2 per cell
     lat_mid <- (lat_min + lat_max) / 2
@@ -506,35 +478,35 @@ for (mut in all_who_mutations){
       z_thresh <- qlogis(p_thresh)
       
       # ---- Compute exceedance on the lon/lat grid for plot_times ----
-      # exceed_post_gaussian_approx <- array(NA, dim = c(nx, ny, length(plot_times)))
+      #exceed_post_gaussian_approx <- array(NA, dim = c(nx, ny, length(plot_times)))
       exceed_post_draw <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
       
       for (k in seq_along(plot_times)) {
         # ============================================================
         # Exceedance probability: via Gaussian approximation
         # ============================================================
-        # t_idx <- which(t_vec == plot_times[k])
-        # 
-        # # Mean z on grid from smoothed feature weights
-        # z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
-        # 
-        # # Var[z] on grid: diag(Phi_full %*% P_t %*% t(Phi_full))
+        #t_idx <- which(t_vec == plot_times[k])
+        
+        # Mean z on grid from smoothed feature weights
+        #z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
+        
+        # Var[z] on grid: diag(Phi_full %*% P_t %*% t(Phi_full))
         # P_t   <- C_smooth[[t_idx]]                 # smoothed state covariance at time t
         # PhiP  <- Phi_full %*% P_t                  # [M x 2D]
         # z_var_vec <- rowSums(PhiP * Phi_full)      # fast diagonal
         # z_var_vec <- pmax(z_var_vec, 0)            # guard tiny negatives
         # z_sd_vec  <- sqrt(z_var_vec)
         # 
-        # # Exceedance under Gaussian approx on logit scale:
-        # # Pr{p > p_thresh} = Pr{z > z_thresh} = 1 - Phi((z_thresh - mean)/sd)
+        # Exceedance under Gaussian approx on logit scale:
+        # Pr{p > p_thresh} = Pr{z > z_thresh} = 1 - Phi((z_thresh - mean)/sd)
         # z_std <- ifelse(z_sd_vec > 0, (z_thresh - z_mean_vec) / z_sd_vec, NA_real_)
         # exc_vec <- ifelse(
         #   is.na(z_std),
         #   as.numeric(z_mean_vec > z_thresh),       # if sd==0, degenerate
         #   1 - pnorm(z_std)
         # )
-        # 
-        # exceed_post_gaussian_approx[, , k] <- matrix(exc_vec, nrow = nx, ncol = ny, byrow = FALSE)
+        
+        #exceed_post_gaussian_approx[, , k] <- matrix(exc_vec, nrow = nx, ncol = ny, byrow = FALSE)
         
         # ============================================================
         # Exceedance probability: via draws
@@ -544,7 +516,7 @@ for (mut in all_who_mutations){
         exceed_post_draw[ , , k] <- matrix(theta_hat, nrow = nx, ncol = ny, byrow = FALSE)
       }
       
-      # exceed_post_gaussian_approx_list[[count]] = exceed_post_gaussian_approx
+      #exceed_post_gaussian_approx_list[[count]] = exceed_post_gaussian_approx
       exceed_post_draws_list[[count]] = exceed_post_draw
       count = count + 1
     }
@@ -552,9 +524,9 @@ for (mut in all_who_mutations){
     # Create a list of results to save
     model_output <- list(
       # Essential predictions
-      # p_mean = p_post_mean,
-      # p_lower = p_post_lo,
-      # p_upper = p_post_hi,
+      #p_mean = p_post_mean,
+      #p_lower = p_post_lo,
+      #p_upper = p_post_hi,
       
       p_post_mean_draw = p_post_mean_draw,
       p_post_lower_draw = p_post_lo_draw,
@@ -587,7 +559,7 @@ for (mut in all_who_mutations){
       #Exceedance prob
       # exceed_post_gaussian_approx_list = exceed_post_gaussian_approx_list,
       exceed_post_draw_list = exceed_post_draws_list,
-      
+      # 
       # Model settings
       settings = list(ell_km = ell_km, tau2 = tau2, D = D)
     )
