@@ -132,7 +132,7 @@ dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
   select(longitude, latitude, year, numerator, denominator, prevalence, mutation, country_name)
 
-shape_Africa <- readRDS("R_ignore/R_scripts/data/shapefiles/sf_admin0_africa.rds")
+shape_Africa <- readRDS("R_ignore/R_scripts/data/sf_admin0_africa.rds")
 shape_water  <- sf::st_read("R_ignore/R_scripts/data/shapefiles/africa_water_bodies.shp", quiet = TRUE)
 
 # --------------------------- Combine K13 data ----------------------------

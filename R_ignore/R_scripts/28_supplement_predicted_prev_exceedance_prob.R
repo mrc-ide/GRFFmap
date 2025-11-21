@@ -56,6 +56,27 @@ mask_to_africa <- function(df, africa_mask) {
   df
 }
 
+library(matrixStats)
+
+posterior_se <- function(draw_list, nx, ny) {
+  T <- length(draw_list)
+  se_array <- array(NA_real_, dim = c(nx, ny, T))
+  
+  for (t in seq_len(T)) {
+    M <- draw_list[[t]]      # (nx*ny) × D matrix
+    D <- ncol(M)
+    
+    # compute SD across posterior draws for each pixel
+    sd_vec <- rowSds(M)
+    se_vec <- sd_vec / sqrt(D)
+    
+    # reshape back to nx × ny
+    se_array[ , , t] <- matrix(se_vec, nrow = nx, ncol = ny, byrow = FALSE)
+  }
+  
+  return(se_array)
+}
+
 # --------------------------- Settings --------------------------------------
 # model parameters
 ell_km <- 80           # RFF length-scale in **kilometres**
@@ -181,10 +202,10 @@ for (mut in all_who_mutations){
       longitude = as.numeric(longitude),
       latitude  = as.numeric(latitude)
     ) |>
-  filter(
-    between(longitude, lon_min, lon_max),
-    between(latitude, lat_min, lat_max)
-  )
+    filter(
+      between(longitude, lon_min, lon_max),
+      between(latitude, lat_min, lat_max)
+    )
   
   pts_pos <- dat_sub |> 
     dplyr::filter(prevalence > 0) 
@@ -254,9 +275,9 @@ for (mut in all_who_mutations){
     # --- Build long data for lower / mean / upper ------------------------------
     cached <- make_or_load(mut, ell_km, tau2)
     
-    p_post_lo <- cached$p_post_lower_draw
-    p_post_hi <- cached$p_post_upper_draw
     p_post_mean <- cached$p_post_mean_draw
+    posterior_draws <- cached$posterior_draws
+    pixel_se <- posterior_se(posterior_draws, nx, ny)
     
     xs <- cached$xs
     ys <- cached$ys
@@ -267,9 +288,8 @@ for (mut in all_who_mutations){
     exceed_prob_10 <- exceed_prob$`10`
     
     # --- Build long data for lower / mean / upper ------------------------------
-    p_long_lo   <- make_raster_long(p_post_lo,   xs, ys, plot_times)
     p_long_mean <- make_raster_long(p_post_mean, xs, ys, plot_times)
-    p_long_hi   <- make_raster_long(p_post_hi,   xs, ys, plot_times)
+    pixel_se_long <- make_raster_long(pixel_se, xs, ys, plot_times)
     
     exceed_prob_long_10 <- make_raster_long(exceed_prob_10, xs, ys, plot_times)
     exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, plot_times)
@@ -277,14 +297,15 @@ for (mut in all_who_mutations){
     
     # --- Mask out sea as white background ------------------------------
     p_long_mean <- mask_to_africa(p_long_mean, africa_mask)
+    pixel_se_long <- mask_to_africa(pixel_se_long, africa_mask)
+      
     exceed_probdraws_long_10 <- mask_to_africa(exceed_prob_long_10, africa_mask)
     exceed_prob_long_5  <- mask_to_africa(exceed_prob_long_5, africa_mask)
     exceed_prob_long_1  <- mask_to_africa(exceed_prob_long_1, africa_mask) 
     
     # --- Crop dataframes to bbox ------------------------------
-    p_long_lo     <- crop_long_df(p_long_lo,     xlim, ylim)
-    p_long_mean   <- crop_long_df(p_long_mean,   xlim, ylim)
-    p_long_hi     <- crop_long_df(p_long_hi,     xlim, ylim)
+    p_long_mean   <- crop_long_df(p_long_mean, xlim, ylim)
+    pixel_se_long <- crop_long_df(pixel_se_long, xlim, ylim)
     exceed_prob_long_10 <- crop_long_df(exceed_prob_long_10, xlim, ylim)
     exceed_prob_long_5  <- crop_long_df(exceed_prob_long_5,  xlim, ylim)
     exceed_prob_long_1  <- crop_long_df(exceed_prob_long_1,  xlim, ylim)
@@ -305,7 +326,7 @@ for (mut in all_who_mutations){
         panel.border = element_rect(color = "grey80", fill = NA),
         legend.title = element_text(size = 10),
         legend.text = element_text(size = 8),
-        title = element_text(size = 12),
+        title = element_text(size = 10),
         axis.text.x = element_text(size = 6, angle = 30, hjust = 1),
         axis.text.y = element_text(size = 6),
         axis.title.x = element_text(size = 8),
@@ -342,7 +363,7 @@ for (mut in all_who_mutations){
       }
       else{
         p <- p + theme(legend.position = "bottom",
-                       legend.key.width = unit(2, "cm"),
+                       legend.key.width = unit(1.5, "cm"),
                        legend.key.height = unit(0.2, "cm"))
       }
       if (title_text != ""){
@@ -387,9 +408,50 @@ for (mut in all_who_mutations){
         ) 
       p <- plot_theme(p)
       p <- p + theme(legend.position = "bottom",
-              legend.key.width = unit(2, "cm"),
-              legend.key.height = unit(0.2, "cm")
-        )
+                     legend.key.width = unit(1.5, "cm"),
+                     legend.key.height = unit(0.2, "cm")
+      )
+      if (title_text != ""){
+        p <- p + labs(title = title_text)
+      }
+      p
+    }
+    
+    plot_se_combined <-function(pixel_se, title_text, legend_title, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = FALSE) {
+      
+      se_max <- max(pixel_se$se, na.rm = TRUE)
+      buffer <- 0.05 * se_max     # 5% buffer
+      upper_limit <- se_max + buffer
+      
+      p <- ggplot() +
+        theme_bw() +
+        annotate(
+          "rect",
+          xmin = xlim[1], xmax = xlim[2],
+          ymin = ylim[1], ymax = ylim[2],
+          fill = "white", colour = NA
+        ) +
+        geom_raster(aes(x = x, y = y, fill = p), data = pixel_se) +
+        geom_sf(data = shape_Africa, linewidth = 0.2, fill = NA, color = "white") +
+        geom_sf(data = shp_water, fill = "white", colour = NA) +
+        coord_sf(xlim = xlim, ylim = ylim, expand = FALSE, crs = st_crs(4326)) +
+        scale_fill_viridis_c(
+          option = "mako",
+          direction = 1,
+          limits = c(0, upper_limit),
+          name = legend_title,
+          na.value = "white"
+        ) +
+        facet_wrap(~t, nrow = 2) +
+        labs(
+          x = "Longitude",
+          y = "Latitude"
+        ) 
+      p <- plot_theme(p)
+      p <- p + theme(legend.position = "bottom",
+                     legend.key.width = unit(1.5, "cm"),
+                     legend.key.height = unit(0.2, "cm")
+      )
       if (title_text != ""){
         p <- p + labs(title = title_text)
       }
@@ -398,9 +460,10 @@ for (mut in all_who_mutations){
     
     # --- Create and print the three separate plots -----------------------------
     
-    plot_mean_no_title_comb  <- plot_layer_combined(p_long_mean, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE)
-    plot_exceed_5_no_title_comb <- plot_exceedance_combined(exceed_prob_long_5, "", legend_title =expression(Pr(Prevalence >= 5*"%")))
-
+    plot_mean_no_title_comb  <- plot_layer_combined(p_long_mean, "Predicted Posterior Mean", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE)
+    plot_exceed_5_no_title_comb <- plot_exceedance_combined(exceed_prob_long_5, expression(paste("Exceedance Probability:  Pr(Prevalence ≥ 5","% )")), legend_title ="Probability")
+    plot_exceed_se <- plot_se_combined(pixel_se_long, "Standard Error", legend_title ="Standard Error")
+    
     prev_pred_exceed_5perc <- 
       ggdraw() +
       draw_label(
@@ -415,18 +478,19 @@ for (mut in all_who_mutations){
         cowplot::plot_grid(
           plot_mean_no_title_comb, 
           plot_exceed_5_no_title_comb,
+          plot_exceed_se,
           ncol = 1,
-          labels = c("A", "B"),
+          labels = c("A", "B", "C"),
           label_size = 18,
           label_x = 0.02,
-          label_y = 0.98
+          label_y = 0.99
         ),
         x = 0,
         y = 0,
         width = 1,
         height = 0.95
       )
-    save_figs(file.path(OUT_COMBINED, paste0(mut, "pred_prev_exceednace_5perc_no_title")), prev_pred_exceed_5perc, height = 9, width = 7)
+    save_figs(file.path(OUT_COMBINED, paste0(mut, "pred_prev_exceednace_5perc_no_title")), prev_pred_exceed_5perc, height = 12, width = 6)
     
     print(paste0("Saved figures for ", mut)) 
   }

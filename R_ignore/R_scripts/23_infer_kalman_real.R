@@ -138,7 +138,7 @@ all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:4
                        "k13:543:T",  "k13:553:L",   "k13:561:H",   "k13:574:L",  "k13:580:Y",
                        "k13:441:L", "k13:449:A",   "k13:469:F",   "k13:481:V",
                        "k13:515:K", "k13:527:H",  "k13:537:I", "k13:537:D", "k13:538:V",  "k13:568:G")
-all_who_mutations = c("k13:675:V", "k13:622:I", "k13:561:H")
+all_who_mutations
 for (mut in all_who_mutations){
   mut_t0 <- Sys.time()  # per-mutation clock start
   
@@ -212,19 +212,15 @@ for (mut in all_who_mutations){
     
     if (mut == "k13:675:V"){
       xlim = c(28, 37)
-      ylim = c(-4, 5)
+      ylim = c(-4.60, 7)
     }
     else if (mut == "k13:comb"){
       xlim = c(28, 48)
       ylim = c(-4.60, 18)
     }
-    else if (mut == "k13:622:I"){
-      xlim = c(32, 45)
-      ylim = c(4, 17)
-    }
     else if (mut == "k13:561:H"){
       xlim = c(28, 32)
-      ylim = c(-4, 0)
+      ylim = c(-3.4, -0.5)
     }
     
     lon_min <- xlim[1] # bb["xmin"]
