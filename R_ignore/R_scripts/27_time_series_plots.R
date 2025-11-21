@@ -196,29 +196,30 @@ for (mut in all_who_mutations){
       max.overlaps = 10
     ) +
     facet_wrap(~ name_0) +
-    #scale_y_continuous(limits = c(0,0.65))+
     scale_color_manual(values = my_colors) +
     scale_fill_manual(values = my_colors)+
     scale_x_continuous(breaks = seq(min(adm1_timeseries_bycountry_data$t), max(adm1_timeseries_bycountry_data$t), by = 2)) +
-#   scale_x_continuous(breaks = unique(adm1_timeseries_bycountry_data$t))+
     labs(
       x = "Year", 
       y = paste("Prevalence"), 
-      title = clean_mut 
-      #paste("Annual Prevalence Trends by Country for", mut, "in ADM 1 where prev is >", prev_cutoff),
+      title = clean_mut
     ) +
     theme_bw()+
     theme(
+      strip.background = element_rect(fill = "white", color = NA),
+      strip.text = element_text(color = "black", face = "plain", size = 10),
+      panel.border = element_rect(color = "grey80", fill = NA),
       legend.title = element_text(size = 10),
-      legend.text = element_text(size = 10),
+      legend.text = element_text(size = 8),
       title = element_text(size = 12),
-      axis.text.x = element_text(size = 8, angle = 30, hjust = 1),  # <-- key tweak
+      axis.text.x = element_text(size = 8, angle = 30, hjust = 1),
       axis.text.y = element_text(size = 8),
-      plot.title = element_text(hjust = 0.05),
-      #axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title.x = element_text(size = 10),
+      axis.title.y = element_text(size = 10),
+      plot.title = element_text(hjust = 0),
       legend.position = "none"
     )
-  save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "country_prev_larger_", prev_cutoff, "_draws")), annual_prev_larger_1perc_plot_country, width = 10)
+  save_figs(file.path(OUT_PLOT_DIR, paste0(mut, "country_prev_larger_", prev_cutoff, "_draws")), annual_prev_larger_1perc_plot_country, width = 8, height = 3)
   
   fig5_plots[[mut]] <- annual_prev_larger_1perc_plot_country
 }
