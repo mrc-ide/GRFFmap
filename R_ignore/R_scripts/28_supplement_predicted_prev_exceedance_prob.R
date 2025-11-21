@@ -419,7 +419,7 @@ for (mut in all_who_mutations){
     
     plot_se_combined <-function(pixel_se, title_text, legend_title, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = FALSE) {
       
-      se_max <- max(pixel_se$se, na.rm = TRUE)
+      se_max <- max(pixel_se$p, na.rm = TRUE)
       buffer <- 0.05 * se_max     # 5% buffer
       upper_limit <- se_max + buffer
       
