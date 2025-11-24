@@ -153,7 +153,7 @@ dat_with_k13 <- dat %>%
 # --------------------------- Define K13 mutants ----------------------------
 
 args <- commandArgs(trailingOnly = TRUE)
-mu <- args[[1]]
+mut <- args[[1]]
 
 # which mutation we are focusing on
 all_who_mutations <- c("k13:comb", 
@@ -507,13 +507,18 @@ for (p_thresh in p_thresh_list) {
   count <- count + 1
 }
 
-p_post_mean = apply(ps, MARGIN = c(1, 2, 3), FUN = mean)
-p_post_median = apply(ps, MARGIN = c(1, 2, 3), FUN = median)
+# --- Calculare mean, median and 95% CIs over posterior draws ----------------
+p_post_mean <- apply(ps, MARGIN = c(1, 2, 3), FUN = mean)
+p_post_median <- apply(ps, MARGIN = c(1, 2, 3), FUN = median)
+p_post_CI <- apply(ps, MARGIN = c(1, 2, 3), FUN = function(x) {
+  diff(quantile(x, probs = c(0.025, 0.975)))
+})
 
 # Create a list of results to save
 model_output <- list(
   p_post_mean = p_post_mean,
   p_post_median = p_post_median,
+  p_post_95_perc_CI = p_post_CI,
   
   # Grid information
   xs = xs,
