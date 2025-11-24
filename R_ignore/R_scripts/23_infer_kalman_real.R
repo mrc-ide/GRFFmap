@@ -8,6 +8,7 @@
 # - Overlays observations with an in-window/out-of-window styling
 # ============================================================
 
+# Load libraries
 library(tidyverse)
 library(Matrix)
 library(here)
@@ -18,15 +19,19 @@ library(fs)
 library(here)
 library(lwgeom) 
 
+# Complete package
 load_all()
 
+# Set seed
 set.seed(1)
+# Turn spherical geometry off
 sf_use_s2(FALSE)
 
-# clock time
+# Clock time
 t0 <- Sys.time()
 
-# build consistent filenames per (mutation, length_space, length_time, n_features)
+# --- Helper Function ----------------------------------------------------------
+# Build consistent filenames per (mutation, length_space, length_time, n_features)
 cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz")) {
   ext <- match.arg(ext)
   fn <- sprintf("%s_lenS%s_lenT%s_%s.%s",
@@ -42,14 +47,14 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
 }
 
 # Per-time exceedance from draws: Pk is [M x D] (M = nx*ny)
-exceed_prob_from_draws <- function(Pk, p_thr) {
+exceed_prob_froms <- function(Pk, p_thr) {
   .row_mean01(Pk > p_thr)  # length M
 }
 
-# --------------------------- Settings --------------------------------------
+# --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1         # RW1 variance in feature space
+ell_km <- 120          # RFF length-scale in **kilometres**
+tau2   <- 0.5         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
@@ -70,12 +75,12 @@ t_num <- length(t_vec)
 plot_times <- seq(2014, 2025, by = 1) # should be within t_vec
 
 # posterior draws
-n_post_draws <- 1000
+num_post_draws <- 500 
 
 # parameters for exceedance plot
 cell_size_km <- 5
 half_m <- (cell_size_km * 1000) / 2
-q_thr <- 0.80   # “high-confidence” threshold on per-cell exceed prob
+q_thr <- 0.80   # probability threshold for exceedance probability
 bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
@@ -83,12 +88,12 @@ bootstrap    <- 500    # bootstrap resamples
 CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
 dir_create(CACHE_DIR)
 
-# read in prevalence data
+# Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
   select(longitude, latitude, year, numerator, denominator, prevalence, mutation)
 
-# read Africa shape files
+# Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
 
 # --------------------------- Fliter admin regions ----------------------------
@@ -134,26 +139,15 @@ dat_with_k13 <- dat %>%
 
 # --------------------------- Define K13 mutants ----------------------------
 # which mutation we are focusing on
-all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:446:I", "k13:458:Y", "k13:476:I",   "k13:493:H",   "k13:539:T",
-                       "k13:543:T",  "k13:553:L",   "k13:561:H",   "k13:574:L",  "k13:580:Y",
-                       "k13:441:L", "k13:449:A",   "k13:469:F",   "k13:481:V",
-                       "k13:515:K", "k13:527:H",  "k13:537:I", "k13:537:D", "k13:538:V",  "k13:568:G")
-all_who_mutations
+all_who_mutations <- c("k13:comb", 
+                       "k13:675:V", 
+                       "k13:622:I", 
+                       "k13:561:H", 
+                       "k13:441:L")
+
 for (mut in all_who_mutations){
-  mut_t0 <- Sys.time()  # per-mutation clock start
-  
-  if (mut == "k13:622:I"){
-    prev_grid_threshold = 4.2
-  }
-  else if(mut %in% c("k13:469:F", "k13:561:H")){
-    prev_grid_threshold = 2
-  }
-  else if(mut == "k13:comb"){
-    prev_grid_threshold = 0
-  }
-  else{
-    prev_grid_threshold = 1
-  }
+  # Per-mutation clock start
+  mut_t0 <- Sys.time()
   
   # --------------------------- Run spatiotemporal ----------------------------
   dat_sub <- dat_with_k13 |>
@@ -193,212 +187,202 @@ for (mut in all_who_mutations){
   }
   
   # --------------------------- Create grid for prediction -----------------------
+  buf_km   <- 500
   
-  # Bounding box in lon/lat (pad so raster isn't clipped)
-  pts_pos <- dat_sub |> 
-    dplyr::filter(prevalence > 0) 
-  if (dim(pts_pos)[1] != 0){
-    buf_km   <- 500
-    bbox_poly <- pts_pos |>
-      sf::st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
-      sf::st_transform(3857) |>
-      sf::st_bbox() |> sf::st_as_sfc() |>
-      sf::st_buffer(buf_km * 1000) |>
-      sf::st_transform(4326)
-    
-    bb   <- sf::st_bbox(bbox_poly)
-    xlim <- c(bb["xmin"], bb["xmax"])
-    ylim <- c(bb["ymin"], bb["ymax"])
-    
-    if (mut == "k13:675:V"){
-      xlim = c(28, 37)
-      ylim = c(-4.60, 7)
+  # Define xlim and ylim for each mutation
+  if (mut == "k13:675:V"){
+    xlim = c(28, 37)
+    ylim = c(-4, 5)
+  }
+  else if (mut == "k13:comb"){
+    xlim = c(28, 48)
+    ylim = c(-4.60, 18)
+  }
+  else if (mut == "k13:622:I"){
+    xlim = c(32, 45)
+    ylim = c(4, 17)
+  }
+  else if (mut == "k13:561:H"){
+    xlim = c(28, 32)
+    ylim = c(-4, 0)
+  }
+  
+  lon_min <- xlim[1] # bb["xmin"]
+  lon_max <- xlim[2] # bb["xmax"]
+  lat_min <- ylim[1] # bb["ymin"]
+  lat_max <- ylim[2] # bb["ymax"]
+  
+  # Grid
+  xs <- seq(lon_min, lon_max, length.out = nx)
+  ys <- seq(lat_min, lat_max, length.out = ny)
+  M <- nx * ny
+  
+  # Build lon/lat grid, then project to km for features
+  grid_ll <- expand.grid(lon = xs, lat = ys)
+  grid_sf <- st_as_sf(grid_ll, coords = c("lon", "lat"), crs = 4326)
+  grid_xy <- st_transform(grid_sf, crs_laea)
+  grid_m  <- st_coordinates(grid_xy)
+  grid_km <- grid_m / 1000
+  
+  # Φ on projected grid (km)
+  OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
+  Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
+  
+  # Storage for means (and later, CIs) at plot_times
+  # z_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
+  p_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
+  p_post_median <- array(NA, dim = c(nx, ny, length(plot_times)))
+  
+  # uncertainty containers
+  # z_post_sd   <- array(NA, dim = c(nx, ny, length(plot_times)))
+  # p_post_lo   <- array(NA, dim = c(nx, ny, length(plot_times)))
+  # p_post_hi   <- array(NA, dim = c(nx, ny, length(plot_times)))
+  
+  # --------------------------- Organize by time ------------------------------
+  # For each time index, collect projected coords and Binomial stats
+  
+  obs_by_t <- vector("list", t_num)
+  for (ti in 1:t_num) {
+    dat_t <- filter(dat_sub, year == t_vec[ti])
+    if (nrow(dat_t) > 0) {
+      S_t    <- cbind(dat_t$Xkm, dat_t$Ykm)          # (m_t x 2) projected coords (km)
+      Phi_t  <- phi_of_coords(S_t)                   # (m_t x 2D)
+      y_t    <- as.numeric(dat_t$numerator)          # positives
+      n_t    <- as.numeric(dat_t$denominator)        # totals
+      kappa  <- y_t - 0.5 * n_t                      # centered counts
+      mu_t   <- rep(z_init, length(y_t))             # constant logit mean
+      obs_by_t[[ti]] <- list(Phi = Phi_t, y = y_t, n = n_t, kappa = kappa, mu = mu_t)
     }
-    else if (mut == "k13:comb"){
-      xlim = c(28, 48)
-      ylim = c(-4.60, 18)
-    }
-    else if (mut == "k13:561:H"){
-      xlim = c(28, 32)
-      ylim = c(-3.4, -0.5)
-    }
+  }
+  
+  # --------------------------- State-space model -----------------------------
+  # Random walk in feature space: w_t = w_{t-1} + ξ_t,  ξ_t ~ N(0, τ² I)
+  Qw   <- Diagonal(2 * D, tau2)
+  m_w  <- matrix(0, 2 * D, t_num)          # smoothed means (initially 0)
+  m0_w <- rep(0, 2 * D)                    # prior mean
+  C0_w <- Matrix(0, 2 * D, 2 * D, sparse = FALSE)  # prior covariance (zero variance, i.e. initial frequency known exactly)
+  
+  # --------------------------- EM loop ---------------------------------------
+  m_pred <- vector("list", t_num)
+  C_pred <- vector("list", t_num)
+  m_filt <- matrix(NA, 2 * D, t_num)
+  C_filt <- vector("list", t_num)
+  
+  for (i in 1:max_iter) {
+    message(sprintf("\nEM iteration %d/%d", i, max_iter))
     
-    lon_min <- xlim[1] # bb["xmin"]
-    lon_max <- xlim[2] # bb["xmax"]
-    lat_min <- ylim[1] # bb["ymin"]
-    lat_max <- ylim[2] # bb["ymax"]
+    # ===== E-step: Expected PG weights =======================================
+    #
+    Omega_list <- vector("list", t_num)
+    r_list     <- vector("list", t_num)
     
-    # Grid
-    xs <- seq(lon_min, lon_max, length.out = nx)
-    ys <- seq(lat_min, lat_max, length.out = ny)
-    M <- nx * ny
-    
-    # Build lon/lat grid, then project to km for features
-    grid_ll <- expand.grid(lon = xs, lat = ys)
-    grid_sf <- st_as_sf(grid_ll, coords = c("lon", "lat"), crs = 4326)
-    grid_xy <- st_transform(grid_sf, crs_laea)
-    grid_m  <- st_coordinates(grid_xy)
-    grid_km <- grid_m / 1000
-    
-    # Φ on projected grid (km)
-    OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
-    Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
-    
-    # Storage for means (and later, CIs) at plot_times
-    z_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-    p_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-    p_post_mean_draw <- array(NA, dim = c(nx, ny, length(plot_times)))
-    
-    # uncertainty containers
-    z_post_sd   <- array(NA, dim = c(nx, ny, length(plot_times)))
-    p_post_lo   <- array(NA, dim = c(nx, ny, length(plot_times)))
-    p_post_hi   <- array(NA, dim = c(nx, ny, length(plot_times)))
-    p_post_lo_draw   <- array(NA, dim = c(nx, ny, length(plot_times)))
-    p_post_hi_draw  <- array(NA, dim = c(nx, ny, length(plot_times)))
-    
-    # --------------------------- Organize by time ------------------------------
-    # For each time index, collect projected coords and Binomial stats
-    
-    obs_by_t <- vector("list", t_num)
     for (ti in 1:t_num) {
-      dat_t <- filter(dat_sub, year == t_vec[ti])
-      if (nrow(dat_t) > 0) {
-        S_t    <- cbind(dat_t$Xkm, dat_t$Ykm)          # (m_t x 2) projected coords (km)
-        Phi_t  <- phi_of_coords(S_t)                   # (m_t x 2D)
-        y_t    <- as.numeric(dat_t$numerator)          # positives
-        n_t    <- as.numeric(dat_t$denominator)        # totals
-        kappa  <- y_t - 0.5 * n_t                      # centered counts
-        mu_t   <- rep(z_init, length(y_t))             # constant logit mean
-        obs_by_t[[ti]] <- list(Phi = Phi_t, y = y_t, n = n_t, kappa = kappa, mu = mu_t)
+      ob <- obs_by_t[[ti]]
+      if (!is.null(ob)) {
+        Phi_t  <- ob$Phi
+        mu_t   <- ob$mu
+        n_t    <- ob$n
+        kappa  <- ob$kappa
+        
+        # Current linear predictor z_t(s) = μ + Φ w_t (current prev map)
+        # Phi_t is the weight at time t
+        z_t <- as.vector(mu_t + Phi_t %*% m_w[, ti])
+        
+        # Expected PG weights: E[ω] = (n / (2|z|)) * tanh(|z|/2)
+        abs_z <- pmax(abs(z_t), z_eps)
+        omega <- 0.5 * n_t / abs_z * tanh(0.5 * abs_z)
+        near0 <- (abs(z_t) < z_eps) | !is.finite(omega)
+        omega[near0] <- n_t[near0] / 4
+        omega <- pmax(omega, omega_floor)
+        
+        Omega_list[[ti]] <- omega
+        r_list[[ti]]     <- kappa / omega
       }
     }
     
-    # --------------------------- State-space model -----------------------------
-    # Random walk in feature space: w_t = w_{t-1} + ξ_t,  ξ_t ~ N(0, τ² I)
-    Qw   <- Diagonal(2 * D, tau2)
-    m_w  <- matrix(0, 2 * D, t_num)          # smoothed means (initially 0)
-    m0_w <- rep(0, 2 * D)                    # prior mean
-    C0_w <- Matrix(0, 2 * D, 2 * D, sparse = FALSE)  # prior covariance (zero variance, i.e. initial frequency known exactly)
+    # ===== M-step: KF + RTS in feature space =================================
+    # Observation model: r_t = μ_t + Φ_t w_t + ε_t,  ε_t ~ N(0, Ω_t^{-1})
+    m_prev <- m0_w
+    C_prev <- C0_w
+    ll_sum <- 0
     
-    # --------------------------- EM loop ---------------------------------------
-    m_pred <- vector("list", t_num)
-    C_pred <- vector("list", t_num)
-    m_filt <- matrix(NA, 2 * D, t_num)
-    C_filt <- vector("list", t_num)
-    
-    for (i in 1:max_iter) {
-      message(sprintf("\nEM iteration %d/%d", i, max_iter))
+    # ---------- Forward (Kalman filter) ----------
+    for (ti in 1:t_num) {
+      m_t_pred <- m_prev
+      C_t_pred <- C_prev + Qw
       
-      # ===== E-step: Expected PG weights =======================================
-      #
-      Omega_list <- vector("list", t_num)
-      r_list     <- vector("list", t_num)
-      for (ti in 1:t_num) {
-        ob <- obs_by_t[[ti]]
-        if (!is.null(ob)) {
-          Phi_t  <- ob$Phi
-          mu_t   <- ob$mu
-          n_t    <- ob$n
-          kappa  <- ob$kappa
-          
-          # Current linear predictor z_t(s) = μ + Φ w_t (current prev map)
-          # Phi_t is the weight at time t
-          z_t <- as.vector(mu_t + Phi_t %*% m_w[, ti])
-          
-          # Expected PG weights: E[ω] = (n / (2|z|)) * tanh(|z|/2)
-          abs_z <- pmax(abs(z_t), z_eps)
-          omega <- 0.5 * n_t / abs_z * tanh(0.5 * abs_z)
-          near0 <- (abs(z_t) < z_eps) | !is.finite(omega)
-          omega[near0] <- n_t[near0] / 4
-          omega <- pmax(omega, omega_floor)
-          
-          Omega_list[[ti]] <- omega
-          r_list[[ti]]     <- kappa / omega
-        }
+      ob <- obs_by_t[[ti]]
+      if (is.null(ob)) {
+        m_t_filt <- m_t_pred
+        C_t_filt <- C_t_pred
+      } else {
+        Phi_t <- ob$Phi
+        mu_t  <- ob$mu
+        omega <- Omega_list[[ti]]
+        r_t   <- r_list[[ti]]
+        
+        m_t <- length(omega)
+        R_t <- Diagonal(m_t, 1 / omega)               # Var(ε_t) = Ω_t⁻¹
+        y_c <- r_t - mu_t                             # centered pseudo-obs
+        
+        # Innovation covariance S_t = Φ P Φ^T + R
+        A   <- Phi_t %*% C_t_pred
+        S_t <- forceSymmetric(A %*% t(Phi_t) + R_t)
+        diag(S_t) <- diag(S_t) + jitter_S             # ensure PD
+        
+        # Innovation ν_t
+        v_t <- y_c - as.vector(Phi_t %*% m_t_pred)
+        
+        # Log-likelihood increment (pseudo-Gaussian)
+        Rch <- chol(S_t)
+        logdetS <- 2 * sum(log(diag(Rch)))
+        quad <- drop(t(solve(Rch, solve(t(Rch), v_t))) %*% v_t)
+        ll_sum <- ll_sum - 0.5 * (logdetS + quad + m_t * log(2*pi))
+        
+        # Kalman gain + update
+        B   <- C_t_pred %*% t(Phi_t)
+        K_t <- t(solve(S_t, t(B)))
+        m_t_filt <- as.vector(m_t_pred + K_t %*% v_t)
+        C_t_filt <- forceSymmetric(C_t_pred - K_t %*% A)
       }
       
-      # ===== M-step: KF + RTS in feature space =================================
-      # Observation model: r_t = μ_t + Φ_t w_t + ε_t,  ε_t ~ N(0, Ω_t^{-1})
-      m_prev <- m0_w
-      C_prev <- C0_w
-      ll_sum <- 0
-      
-      # ---------- Forward (Kalman filter) ----------
-      for (ti in 1:t_num) {
-        m_t_pred <- m_prev
-        C_t_pred <- C_prev + Qw
-        
-        ob <- obs_by_t[[ti]]
-        if (is.null(ob)) {
-          m_t_filt <- m_t_pred
-          C_t_filt <- C_t_pred
-        } else {
-          Phi_t <- ob$Phi
-          mu_t  <- ob$mu
-          omega <- Omega_list[[ti]]
-          r_t   <- r_list[[ti]]
-          
-          m_t <- length(omega)
-          R_t <- Diagonal(m_t, 1 / omega)               # Var(ε_t) = Ω_t⁻¹
-          y_c <- r_t - mu_t                             # centered pseudo-obs
-          
-          # Innovation covariance S_t = Φ P Φ^T + R
-          A   <- Phi_t %*% C_t_pred
-          S_t <- forceSymmetric(A %*% t(Phi_t) + R_t)
-          diag(S_t) <- diag(S_t) + jitter_S             # ensure PD
-          
-          # Innovation ν_t
-          v_t <- y_c - as.vector(Phi_t %*% m_t_pred)
-          
-          # Log-likelihood increment (pseudo-Gaussian)
-          Rch <- chol(S_t)
-          logdetS <- 2 * sum(log(diag(Rch)))
-          quad <- drop(t(solve(Rch, solve(t(Rch), v_t))) %*% v_t)
-          ll_sum <- ll_sum - 0.5 * (logdetS + quad + m_t * log(2*pi))
-          
-          # Kalman gain + update
-          B   <- C_t_pred %*% t(Phi_t)
-          K_t <- t(solve(S_t, t(B)))
-          m_t_filt <- as.vector(m_t_pred + K_t %*% v_t)
-          C_t_filt <- forceSymmetric(C_t_pred - K_t %*% A)
-        }
-        
-        # Store + propagate
-        m_pred[[ti]] <- m_t_pred
-        C_pred[[ti]] <- C_t_pred
-        m_filt[, ti] <- m_t_filt
-        C_filt[[ti]] <- C_t_filt
-        m_prev <- m_t_filt
-        C_prev <- C_t_filt
-      }
-      
-      # ---------- Backward (RTS smoother) ----------
-      m_smooth <- m_filt
-      C_smooth <- C_filt
-      for (ti in (t_num - 1):1) {
-        Ptt  <- C_filt[[ti]]
-        Pnpt <- C_pred[[ti + 1]]
-        mnpt <- m_pred[[ti + 1]]
-        
-        Rch <- chol(forceSymmetric(Pnpt))
-        J_t <- Ptt %*% solve(Rch, solve(t(Rch), Diagonal(nrow(Pnpt))))
-        m_smooth[, ti] <- as.vector(m_filt[, ti] + J_t %*% (m_smooth[, ti + 1] - mnpt))
-      }
-      
-      # Update EM parameters
-      m_w_old <- m_w
-      m_w     <- m_smooth
-      num <- sqrt(sum((m_w - m_w_old)^2))
-      den <- sqrt(sum(m_w_old^2) + 1e-12)
-      rel_change <- num / den
-      
-      message(sprintf("  pseudo-Gaussian log-lik: %.3f,  rel_change(w): %.3e", ll_sum, rel_change))
+      # Store + propagate
+      m_pred[[ti]] <- m_t_pred
+      C_pred[[ti]] <- C_t_pred
+      m_filt[, ti] <- m_t_filt
+      C_filt[[ti]] <- C_t_filt
+      m_prev <- m_t_filt
+      C_prev <- C_t_filt
     }
     
-    # ============================================================
-    # Reconstruct z_t(s) and prevalence on lon/lat grid (for plotting)
-    # ============================================================
-    posterior_draws_list <- list()
+    # ---------- Backward (RTS smoother) ----------
+    m_smooth <- m_filt
+    C_smooth <- C_filt
+    for (ti in (t_num - 1):1) {
+      Ptt  <- C_filt[[ti]]
+      Pnpt <- C_pred[[ti + 1]]
+      mnpt <- m_pred[[ti + 1]]
+      
+      Rch <- chol(forceSymmetric(Pnpt))
+      J_t <- Ptt %*% solve(Rch, solve(t(Rch), Diagonal(nrow(Pnpt))))
+      m_smooth[, ti] <- as.vector(m_filt[, ti] + J_t %*% (m_smooth[, ti + 1] - mnpt))
+    }
+    
+    # Update EM parameters
+    m_w_old <- m_w
+    m_w     <- m_smooth
+    num <- sqrt(sum((m_w - m_w_old)^2))
+    den <- sqrt(sum(m_w_old^2) + 1e-12)
+    rel_change <- num / den
+    
+    message(sprintf("  pseudo-Gaussian log-lik: %.3f,  rel_change(w): %.3e", ll_sum, rel_change))
+  }
+  
+  # ============================================================
+  # Reconstruct z_t(s) and prevalence on lon/lat grid (for optional plotting)
+  # ============================================================
+  if (FALSE) {
+    
     for (k in seq_along(plot_times)) {
       t_idx <- which(t_vec == plot_times[k])
       
@@ -414,198 +398,177 @@ for (mut in all_who_mutations){
       z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
       
       # Transform to prevalence and 95% pointwise intervals
-      # p_mean_vec <- plogis(z_mean_vec)
-      # p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
-      # p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
-      
-      # Posterior draws
-      message(sprintf("Time Series Draws: %d ", n_post_draws))
-      L_t <- chol(P_t)
-      w_draws <- matrix(m_w[, t_idx], ncol = 1) + L_t %*% matrix(rnorm(ncol(P_t) * n_post_draws), ncol = n_post_draws)
-      z_draws <-as.matrix( z_init + Phi_full %*% w_draws)
-      p_draws <- plogis(z_draws)
-      posterior_draws_list[[k]] <- p_draws 
-      
-      # Calculate mean with CrI
-      p_mean_exact <- rowMeans(p_draws)
-      p_lo_exact   <- apply(p_draws, 1, quantile, 0.025, na.rm=TRUE)
-      p_hi_exact   <- apply(p_draws, 1, quantile, 0.975, na.rm=TRUE)
+      p_mean_vec <- plogis(z_mean_vec)
+      p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
+      p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
       
       # Store as [nx x ny]
       z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-      # p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+      p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
       z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      # p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      # p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      p_post_mean_draw[, , k] <- matrix(p_mean_exact, nx, ny, byrow = FALSE)
-      p_post_lo_draw[,   , k] <- matrix(p_lo_exact,   nx, ny, byrow = FALSE)
-      p_post_hi_draw[,   , k] <- matrix(p_hi_exact,   nx, ny, byrow = FALSE)
+      p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      
+      # Long df for raster plotting (lon/lat axes)
+      p_long <- do.call(rbind, lapply(seq_along(plot_times), function(k) {
+        data.frame(
+          x = rep(xs, times = ny),
+          y = rep(ys, each  = nx),
+          p = as.vector(p_post_mean[, , k]),
+          t = factor(plot_times[k], levels = plot_times)
+        )
+      }))
+      
+      # Base facet raster
+      plot1 <- ggplot() + theme_bw() +
+        geom_raster(aes(x = x, y = y, fill = p), data = p_long) +
+        coord_fixed(expand = FALSE) +
+        scale_fill_viridis_c(option = "magma", name = "Prevalence") +
+        facet_wrap(~ t, nrow = 2) +
+        labs(x = "Longitude", y = "Latitude") + 
+        ggtitle(sprintf("EM step %s", i))
+      
+      print(plot1)
     }
-    
-    # ============================================================
-    # Time-series
-    # ============================================================
-    # Map grid to admin units
-    grid_sf <- st_as_sf(expand.grid(x = xs, y = ys), coords = c("x", "y"), crs = st_crs(admin1_regions))
-    points_to_regions <- st_join(grid_sf, admin1_regions %>% dplyr::select(id_1, name_0, name_1)) %>%
-      st_drop_geometry() %>%
-      mutate(pixel_index = 1:n()) %>%
-      drop_na(id_1)
-    
-    # Combine posterior draws across time
-    region_draws <- list()
-    for (k in seq_along(plot_times)) {
-      draws_k <- posterior_draws_list[[k]][points_to_regions$pixel_index, ]  # [pixels x draws]
-      
-      df <- as.data.frame(draws_k)
-      df$id_1 <- points_to_regions$id_1
-      
-      df_long <- df %>%
-        pivot_longer(cols = starts_with("V"), names_to = "draw", values_to = "p") %>%
-        group_by(id_1, draw) %>%
-        summarise(mean_p = mean(p, na.rm = TRUE), .groups = "drop") %>%
-        mutate(t = plot_times[k])
-      
-      region_draws[[k]] <- df_long
-    }
-    
-    df_posterior_timeseries <- bind_rows(region_draws)
-    
-    # ============================================================
-    # Exceedance probability surface: Pr{ p(s,t) > p_thresh }
-    # ============================================================
-    
-    # ---- Choose threshold(s) in prevalence units ---
-    p_thresh_list <- c("10" = 0.10, "5" = 0.05, "1" = 0.01)
-    
-    # Calculate area km2 per cell
-    lat_mid <- (lat_min + lat_max) / 2
-    # 1 degree lat ≈ 111.32 km and 1 degree lon ≈ 111.32 * cos(latitude)
-    km_per_deg_lat <- 111.32
-    km_per_deg_lon <- 111.32 * cos(lat_mid * pi / 180)
-    dx_deg <- (lon_max - lon_min) / (nx - 1)  # cell width in degrees lon
-    dy_deg <- (lat_max - lat_min) / (ny - 1)  # cell height in degrees lat
-    dx_km <- dx_deg * km_per_deg_lon
-    dy_km <- dy_deg * km_per_deg_lat
-    cell_area_km2 <- dx_km * dy_km
-    
-    # initalize list for exceedance prob based on Gaussian approx
-    # exceed_post_gaussian_approx_list <- vector("list", length(p_thresh_list))
-    # names(exceed_post_gaussian_approx_list) <- names(p_thresh_list)
-    
-    # initalize list for exceedance prob based on draws
-    exceed_post_draws_list <- vector("list", length(p_thresh_list))
-    names(exceed_post_draws_list) <- names(p_thresh_list)
-    
-    count = 1
-    for (p_thresh in p_thresh_list){
-      z_thresh <- qlogis(p_thresh)
-      
-      # ---- Compute exceedance on the lon/lat grid for plot_times ----
-      # exceed_post_gaussian_approx <- array(NA, dim = c(nx, ny, length(plot_times)))
-      exceed_post_draw <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
-      
-      for (k in seq_along(plot_times)) {
-        # ============================================================
-        # Exceedance probability: via Gaussian approximation
-        # ============================================================
-        # t_idx <- which(t_vec == plot_times[k])
-        # 
-        # # Mean z on grid from smoothed feature weights
-        # z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
-        # 
-        # # Var[z] on grid: diag(Phi_full %*% P_t %*% t(Phi_full))
-        # P_t   <- C_smooth[[t_idx]]                 # smoothed state covariance at time t
-        # PhiP  <- Phi_full %*% P_t                  # [M x 2D]
-        # z_var_vec <- rowSums(PhiP * Phi_full)      # fast diagonal
-        # z_var_vec <- pmax(z_var_vec, 0)            # guard tiny negatives
-        # z_sd_vec  <- sqrt(z_var_vec)
-        # 
-        # # Exceedance under Gaussian approx on logit scale:
-        # # Pr{p > p_thresh} = Pr{z > z_thresh} = 1 - Phi((z_thresh - mean)/sd)
-        # z_std <- ifelse(z_sd_vec > 0, (z_thresh - z_mean_vec) / z_sd_vec, NA_real_)
-        # exc_vec <- ifelse(
-        #   is.na(z_std),
-        #   as.numeric(z_mean_vec > z_thresh),       # if sd==0, degenerate
-        #   1 - pnorm(z_std)
-        # )
-        # 
-        # exceed_post_gaussian_approx[, , k] <- matrix(exc_vec, nrow = nx, ncol = ny, byrow = FALSE)
-        
-        # ============================================================
-        # Exceedance probability: via draws
-        # ============================================================
-        Pk <- posterior_draws_list[[k]]            # [M x D] of prevalences from draws
-        theta_hat <- exceed_prob_from_draws(Pk, p_thresh)   # length M
-        exceed_post_draw[ , , k] <- matrix(theta_hat, nrow = nx, ncol = ny, byrow = FALSE)
-      }
-      
-      # exceed_post_gaussian_approx_list[[count]] = exceed_post_gaussian_approx
-      exceed_post_draws_list[[count]] = exceed_post_draw
-      count = count + 1
-    }
-    
-    # Create a list of results to save
-    model_output <- list(
-      # Essential predictions
-      # p_mean = p_post_mean,
-      # p_lower = p_post_lo,
-      # p_upper = p_post_hi,
-      
-      p_post_mean_draw = p_post_mean_draw,
-      p_post_lower_draw = p_post_lo_draw,
-      p_post_upper_draw = p_post_hi_draw,
-      
-      # Grid information
-      xs = xs,
-      ys = ys,
-      lon_min = lon_min,
-      lon_max = lon_max,
-      lat_min = lat_min,
-      lat_max = lat_max,
-      plot_times = plot_times,
-      
-      # Original data
-      data_subset = dat_sub,
-      
-      # Core model components (optional, for flexibility)
-      weights_mean = m_w,
-      weights_cov = C_smooth,
-      random_frequencies = Omega,
-      
-      # Posterior draws
-      num_posterior_draws = n_post_draws,
-      posterior_draws = posterior_draws_list,
-      
-      # Time-series
-      time_series = df_posterior_timeseries,
-      
-      #Exceedance prob
-      # exceed_post_gaussian_approx_list = exceed_post_gaussian_approx_list,
-      exceed_post_draw_list = exceed_post_draws_list,
-      
-      # Model settings
-      settings = list(ell_km = ell_km, tau2 = tau2, D = D)
-    )
-    
-    # Use your cache_path function to create a filename
-    output_filename <- cache_path(
-      mut = mut, 
-      lenS = ell_km, 
-      lenT = tau2, 
-      what = "full_model_output", 
-      ext = "rds"
-    )
-    
-    # Save the single list object to an .rds file
-    saveRDS(model_output, file = output_filename)
-    
-    message(sprintf("Saved full model output for %s", mut)) 
-    
-    mut_elapsed <- Sys.time() - mut_t0
-    message(sprintf("Elapsed for %s: %.2f min",
-                    mut, as.numeric(mut_elapsed, units = "mins")))
   }
+  
+  # ================================================
+  # Joint posterior sampling of β_t and surfaces
+  # ================================================
+  
+  # Storage:
+  # - betas:  (2D x t_num x B)      feature-space trajectories
+  # - ps:     (nx x ny x t_num x B) prevalence surfaces
+  betas <- array(NA_real_, dim = c(2 * D, t_num, num_post_draws))
+  ps    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
+  
+  for (b in 1:num_post_draws) {
+    message(sprintf("...Posterior draw %s of %s", b, num_post_draws))
+    
+    # --------------------------------------------
+    # 1. Backward sampling in feature space (β_t)
+    # --------------------------------------------
+    beta_b <- matrix(NA_real_, nrow = 2 * D, ncol = t_num)
+    
+    # Sample final time T from N(m_filt[,T], C_filt[[T]])
+    T_idx <- t_num
+    P_T   <- forceSymmetric(C_filt[[T_idx]])
+    Rch_T <- chol(P_T)
+    eta_T <- rnorm(2 * D)
+    beta_b[, T_idx] <- as.numeric(m_filt[, T_idx] + Rch_T %*% eta_T)
+    
+    # Backward recursion for t = T-1,...,1
+    for (ti in (t_num - 1):1) {
+      # Filtered mean/cov at time t
+      a_t <- m_filt[, ti]                 # β_{t|t}
+      P_t <- forceSymmetric(C_filt[[ti]]) # P_{t|t}
+      
+      # One-step-ahead prediction at time t+1
+      a_tp1 <- m_pred[[ti + 1]]           # β_{t+1|t}
+      R_tp1 <- forceSymmetric(C_pred[[ti + 1]])  # P_{t+1|t}
+      
+      # Smoothing gain J_t = P_{t|t} (P_{t+1|t})^{-1}
+      Rch <- chol(R_tp1)
+      J_t <- P_t %*% solve(Rch, solve(t(Rch), Diagonal(nrow(R_tp1))))
+      
+      # Conditional mean and covariance of β_t | β_{t+1}, y
+      mean_t <- as.numeric(a_t + J_t %*% (beta_b[, ti + 1] - a_tp1))
+      Var_t  <- forceSymmetric(P_t - J_t %*% R_tp1 %*% t(J_t))
+      
+      # Draw β_t ~ N(mean_t, Var_t)
+      Rch_t <- chol(Var_t)
+      eta_t <- rnorm(2 * D)
+      beta_b[, ti] <- as.numeric(mean_t + Rch_t %*% eta_t)
+    }
+    
+    # Store β path
+    betas[, , b] <- beta_b
+    
+    # --------------------------------------------
+    # 2. Map β_t path to full surfaces z(s,t), p(s,t)
+    # --------------------------------------------
+    for (ti in 1:t_num) {
+      z_vec <- as.numeric(z_init + Phi_full %*% beta_b[, ti])   # length M = nx*ny
+      z_mat <- matrix(z_vec, nrow = nx, ncol = ny, byrow = FALSE)
+      p_mat <- plogis(z_mat)
+      
+      ps[, , ti, b] <- p_mat
+    }
+  }
+  
+  # ============================================================
+  # Exceedance probability surface: Pr{ p(s,t) > p_thresh }
+  # ============================================================
+  p_thresh_list <- c("1" = 0.01, "5" = 0.05, "10" = 0.10)
+  
+  exceed_post_p_thresh <- array(
+    NA_real_, dim = c(nx, ny, length(plot_times), length(p_thresh_list))
+  )
+  
+  count <- 1
+  for (p_thresh in p_thresh_list) {
+    
+    exceed_post <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
+    
+    for (k in seq_along(plot_times)) {
+      exceed_post[, , k] <- apply(
+        ps[, , k, ],          # [nx, ny, ns]
+        MARGIN = c(1, 2),          # keep x,y; collapse draws
+        FUN = function(x) mean(x > p_thresh)
+      )
+    }
+    
+    exceed_post_p_thresh[, , , count] <- exceed_post
+    count <- count + 1
+  }
+  
+  p_post_mean = apply(ps, MARGIN = c(1, 2, 3), FUN = mean)
+  p_post_median = apply(ps, MARGIN = c(1, 2, 3), FUN = median)
+  
+  # Create a list of results to save
+  model_output <- list(
+    p_post_mean = p_post_mean,
+    p_post_median = p_post_median,
+    
+    # Grid information
+    xs = xs,
+    ys = ys,
+    lon_min = lon_min,
+    lon_max = lon_max,
+    lat_min = lat_min,
+    lat_max = lat_max,
+    plot_times = plot_times,
+    
+    # Original data
+    data_subset = dat_sub,
+    
+    # Posterior draws
+    num_posteriors = num_post_draws,
+    
+    #Exceedance prob
+    exceed_post_list = exceed_post_p_thresh,
+    
+    # Model settings
+    settings = list(ell_km = ell_km, tau2 = tau2, D = D)
+  )
+  
+  # Use your cache_path function to create a filename
+  output_filename <- cache_path(
+    mut = mut, 
+    lenS = ell_km, 
+    lenT = tau2, 
+    what = "full_model_output", 
+    ext = "rds"
+  )
+  
+  # Save the single list object to an .rds file
+  saveRDS(model_output, file = output_filename)
+  
+  message(sprintf("Saved full model output for %s", mut)) 
+  
+  mut_elapsed <- Sys.time() - mut_t0
+  message(sprintf("Elapsed for %s: %.2f min",
+                  mut, as.numeric(mut_elapsed, units = "mins")))
 }
 
 total_elapsed <- Sys.time() - t0
