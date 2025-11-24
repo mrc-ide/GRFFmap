@@ -85,7 +85,7 @@ bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
 
-CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
