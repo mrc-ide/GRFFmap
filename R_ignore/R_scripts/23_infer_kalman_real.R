@@ -524,6 +524,9 @@ for (mut in all_who_mutations){
   
   p_post_mean = apply(ps, MARGIN = c(1, 2, 3), FUN = mean)
   p_post_median = apply(ps, MARGIN = c(1, 2, 3), FUN = median)
+  p_post_CI <- apply(ps, MARGIN = c(1, 2, 3), FUN = function(x) {
+    diff(quantile(x, probs = c(0.025, 0.975)))
+  })s
   
   # Create a list of results to save
   model_output <- list(
