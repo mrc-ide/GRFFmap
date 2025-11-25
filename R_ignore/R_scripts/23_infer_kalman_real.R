@@ -39,43 +39,31 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
   file.path(CACHE_DIR, fn)
 }
 
-# NA-robust row mean for 0/1 matrices
-.row_mean01 <- function(X01) {
-  Dk   <- rowSums(!is.na(X01))
-  succ <- rowSums(X01, na.rm = TRUE)
-  ifelse(Dk > 0L, succ / Dk, NA_real_)
-}
-
-# Per-time exceedance from draws: Pk is [M x D] (M = nx*ny)
-exceed_prob_froms <- function(Pk, p_thr) {
-  .row_mean01(Pk > p_thr)  # length M
-}
-
 # --- Settings -----------------------------------------------------------------
 # model parameters
 ell_km <- 120          # RFF length-scale in **kilometres**
 tau2   <- 0.5         # RW1 variance in feature space
-p_init <- 0.001
+p_init <- 0.01
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 100         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 200
-ny <- 200
-t_vec <- 2012:2025
+nx <- 100
+ny <- 100
+t_vec <- 1995:2030
 t_num <- length(t_vec)
 
 # plotting parameters
 plot_times <- seq(2014, 2025, by = 1) # should be within t_vec
 
 # posterior draws
-num_post_draws <- 500 
+num_post_draws <- 100 
 
 # parameters for exceedance plot
 cell_size_km <- 5
@@ -144,7 +132,7 @@ all_who_mutations <- c("k13:comb",
                        "k13:622:I", 
                        "k13:561:H", 
                        "k13:441:L")
-
+mut <- "k13:675:V"
 for (mut in all_who_mutations){
   # Per-mutation clock start
   mut_t0 <- Sys.time()
@@ -187,22 +175,20 @@ for (mut in all_who_mutations){
   }
   
   # --------------------------- Create grid for prediction -----------------------
-  buf_km   <- 500
   
   # Define xlim and ylim for each mutation
   if (mut == "k13:675:V"){
     xlim = c(28, 37)
     ylim = c(-4, 5)
-  }
-  else if (mut == "k13:comb"){
+    # xlim = c(25, 40)
+    # ylim = c(-7, 18)
+  } else if (mut == "k13:comb"){
     xlim = c(28, 48)
     ylim = c(-4.60, 18)
-  }
-  else if (mut == "k13:622:I"){
+  } else if (mut == "k13:622:I"){
     xlim = c(32, 45)
     ylim = c(4, 17)
-  }
-  else if (mut == "k13:561:H"){
+  } else if (mut == "k13:561:H"){
     xlim = c(28, 32)
     ylim = c(-4, 0)
   }
@@ -215,7 +201,7 @@ for (mut in all_who_mutations){
   # Grid
   xs <- seq(lon_min, lon_max, length.out = nx)
   ys <- seq(lat_min, lat_max, length.out = ny)
-  M <- nx * ny
+  M  <- nx * ny
   
   # Build lon/lat grid, then project to km for features
   grid_ll <- expand.grid(lon = xs, lat = ys)
@@ -225,18 +211,17 @@ for (mut in all_who_mutations){
   grid_km <- grid_m / 1000
   
   # Φ on projected grid (km)
-  OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
-  Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
+  OS_full   <- grid_km %*% t(Omega)
+  Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D))
   
   # Storage for means (and later, CIs) at plot_times
-  # z_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
+  z_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
   p_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_median <- array(NA, dim = c(nx, ny, length(plot_times)))
   
   # uncertainty containers
-  # z_post_sd   <- array(NA, dim = c(nx, ny, length(plot_times)))
-  # p_post_lo   <- array(NA, dim = c(nx, ny, length(plot_times)))
-  # p_post_hi   <- array(NA, dim = c(nx, ny, length(plot_times)))
+  z_post_sd   <- array(NA, dim = c(nx, ny, length(plot_times)))
+  p_post_lo   <- array(NA, dim = c(nx, ny, length(plot_times)))
+  p_post_hi   <- array(NA, dim = c(nx, ny, length(plot_times)))
   
   # --------------------------- Organize by time ------------------------------
   # For each time index, collect projected coords and Binomial stats
@@ -272,7 +257,6 @@ for (mut in all_who_mutations){
     message(sprintf("\nEM iteration %d/%d", i, max_iter))
     
     # ===== E-step: Expected PG weights =======================================
-    #
     Omega_list <- vector("list", t_num)
     r_list     <- vector("list", t_num)
     
@@ -284,8 +268,7 @@ for (mut in all_who_mutations){
         n_t    <- ob$n
         kappa  <- ob$kappa
         
-        # Current linear predictor z_t(s) = μ + Φ w_t (current prev map)
-        # Phi_t is the weight at time t
+        # Current linear predictor z_t(s) = μ + Φ w_t
         z_t <- as.vector(mu_t + Phi_t %*% m_w[, ti])
         
         # Expected PG weights: E[ω] = (n / (2|z|)) * tanh(|z|/2)
@@ -376,38 +359,39 @@ for (mut in all_who_mutations){
     rel_change <- num / den
     
     message(sprintf("  pseudo-Gaussian log-lik: %.3f,  rel_change(w): %.3e", ll_sum, rel_change))
-  }
-  
-  # ============================================================
-  # Reconstruct z_t(s) and prevalence on lon/lat grid (for optional plotting)
-  # ============================================================
-  if (FALSE) {
     
-    for (k in seq_along(plot_times)) {
-      t_idx <- which(t_vec == plot_times[k])
+    # ============================================================
+    # Plot on-the-fly for checking
+    # ============================================================
+    
+    if (FALSE) {
       
-      # Mean z on grid
-      z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
-      
-      # Var[z] on grid: diag(Phi_full P_t Phi_full')
-      # Efficient diagonal via row-wise quadratic form:
-      #  V = rowSums( (Phi_full %*% P_t) * Phi_full )
-      P_t <- C_smooth[[t_idx]]
-      PhiP <- Phi_full %*% P_t               # [M x 2D]
-      z_var_vec <- rowSums(PhiP * Phi_full)  # elementwise product, row-sum
-      z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
-      
-      # Transform to prevalence and 95% pointwise intervals
-      p_mean_vec <- plogis(z_mean_vec)
-      p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
-      p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
-      
-      # Store as [nx x ny]
-      z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-      p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-      z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-      p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      for (k in seq_along(plot_times)) {
+        t_idx <- which(t_vec == plot_times[k])
+        
+        # Mean z on grid
+        z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
+        
+        # Var[z] on grid: diag(Phi_full P_t Phi_full')
+        # Efficient diagonal via row-wise quadratic form:
+        #  V = rowSums( (Phi_full %*% P_t) * Phi_full )
+        P_t <- C_smooth[[t_idx]]
+        PhiP <- Phi_full %*% P_t               # [M x 2D]
+        z_var_vec <- rowSums(PhiP * Phi_full)  # elementwise product, row-sum
+        z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
+        
+        # Transform to prevalence and 95% pointwise intervals
+        p_mean_vec <- plogis(z_mean_vec)
+        p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
+        p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
+        
+        # Store as [nx x ny]
+        z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+        p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+        z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+        p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+        p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      }
       
       # Long df for raster plotting (lon/lat axes)
       p_long <- do.call(rbind, lapply(seq_along(plot_times), function(k) {
@@ -429,6 +413,7 @@ for (mut in all_who_mutations){
         ggtitle(sprintf("EM step %s", i))
       
       print(plot1)
+      
     }
   }
   
@@ -437,13 +422,13 @@ for (mut in all_who_mutations){
   # ================================================
   
   # Storage:
-  # - betas:  (2D x t_num x B)      feature-space trajectories
-  # - ps:     (nx x ny x t_num x B) prevalence surfaces
-  betas <- array(NA_real_, dim = c(2 * D, t_num, num_post_draws))
-  ps    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
+  # - beta_draws:  (2D x t_num x B)      feature-space trajectories
+  # - p_draws:     (nx x ny x t_num x B) prevalence surfaces
+  beta_draws <- array(NA_real_, dim = c(2 * D, t_num, num_post_draws))
+  p_draws    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
   
   for (b in 1:num_post_draws) {
-    message(sprintf("...Posterior draw %s of %s", b, num_post_draws))
+    message(sprintf("Posterior draw %s of %s", b, num_post_draws))
     
     # --------------------------------------------
     # 1. Backward sampling in feature space (β_t)
@@ -482,7 +467,7 @@ for (mut in all_who_mutations){
     }
     
     # Store β path
-    betas[, , b] <- beta_b
+    beta_draws[, , b] <- beta_b
     
     # --------------------------------------------
     # 2. Map β_t path to full surfaces z(s,t), p(s,t)
@@ -492,7 +477,7 @@ for (mut in all_who_mutations){
       z_mat <- matrix(z_vec, nrow = nx, ncol = ny, byrow = FALSE)
       p_mat <- plogis(z_mat)
       
-      ps[, , ti, b] <- p_mat
+      p_draws[, , ti, b] <- p_mat
     }
   }
   
@@ -502,31 +487,26 @@ for (mut in all_who_mutations){
   p_thresh_list <- c("1" = 0.01, "5" = 0.05, "10" = 0.10)
   
   exceed_post_p_thresh <- array(
-    NA_real_, dim = c(nx, ny, length(plot_times), length(p_thresh_list))
+    NA_real_, dim = c(nx, ny, length(t_vec), length(p_thresh_list))
   )
   
   count <- 1
   for (p_thresh in p_thresh_list) {
     
-    exceed_post <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
-    
-    for (k in seq_along(plot_times)) {
-      exceed_post[, , k] <- apply(
-        ps[, , k, ],          # [nx, ny, ns]
-        MARGIN = c(1, 2),          # keep x,y; collapse draws
-        FUN = function(x) mean(x > p_thresh)
-      )
-    }
+    exceed_post <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
+      mean(x > p_thresh)
+    })
+    exceed_post <- array(exceed_post, dim = c(nx, ny, length(t_vec)))
     
     exceed_post_p_thresh[, , , count] <- exceed_post
     count <- count + 1
   }
   
-  p_post_mean = apply(ps, MARGIN = c(1, 2, 3), FUN = mean)
-  p_post_median = apply(ps, MARGIN = c(1, 2, 3), FUN = median)
-  p_post_CI <- apply(ps, MARGIN = c(1, 2, 3), FUN = function(x) {
+  p_post_mean = apply(p_draws, MARGIN = c(1, 2, 3), FUN = mean)
+  p_post_median = apply(p_draws, MARGIN = c(1, 2, 3), FUN = median)
+  p_post_CI <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
     diff(quantile(x, probs = c(0.025, 0.975)))
-  })s
+  })
   
   # Create a list of results to save
   model_output <- list(
@@ -577,3 +557,51 @@ for (mut in all_who_mutations){
 total_elapsed <- Sys.time() - t0
 message(sprintf("Total elapsed: %.2f min",
                 as.numeric(total_elapsed, units = "mins")))
+
+
+plot_idx <- match(plot_times, t_vec)  # indices in 1:t_num
+p_exceed <- exceed_post_p_thresh[ , , , 2]
+
+make_raster_long(p_exceed, xs, ys, plot_times) |>
+  plot_layer(title_text = "Exceedance probability (5%)", points_df = NULL)
+
+make_raster_long <- function(arr3, xs, ys, times) {
+  do.call(rbind, lapply(seq_along(times), function(k) {
+    data.frame(
+      x = rep(xs, times = ny),
+      y = rep(ys, each  = nx),
+      p = as.vector(arr3[, , k]),
+      t = factor(times[k], levels = times)
+    )
+  }))
+}
+
+# Helper to generate a consistent ggplot with point overlays
+plot_layer <- function(p_long_df, title_text, points_df = NULL) {
+  
+  # Raster layer for predicted prevalence
+  ret <- ggplot() + theme_bw() +
+    geom_raster(aes(x = x, y = y, fill = p), data = p_long_df) +
+    coord_fixed(expand = FALSE) +
+    scale_fill_viridis_c(option = "magma", name = "Prevalence") +
+    facet_wrap(~ t, nrow = 2) +
+    labs(x = "Longitude", y = "Latitude", title = title_text)
+  
+  # optional add points
+  if (!is.null(points_df)) {
+    
+    # Out-of-window observations (small grey crosses)
+    ret <- ret + geom_point(
+      aes(x = longitude, y = latitude),
+      data = dplyr::filter(points_df, !in_window),
+      shape = 4, colour = "grey60", size = 1, stroke = 0.2
+    ) +
+      # In-window observations (filled circles, viridis fill)
+      geom_point(
+        aes(x = longitude, y = latitude, fill = p_obs),
+        data = dplyr::filter(points_df, in_window),
+        shape = 21, colour = "grey60", size = 2
+      )
+  }
+  ret
+}
