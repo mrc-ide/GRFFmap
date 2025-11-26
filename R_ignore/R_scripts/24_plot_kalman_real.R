@@ -95,8 +95,8 @@ add_year_block <- function(df) {
 
 # --------------------------- Settings --------------------------------------
 # model parameters
-ell_km <- 120          # RFF length-scale in **kilometres**
-tau2   <- 0.5          # RW1 variance in feature space
+ell_km <- 80          # RFF length-scale in **kilometres**
+tau2   <- 0.1          # RW1 variance in feature space
 
 # inference parameters
 D        <- 300         # number of random frequencies (try 200–500)
