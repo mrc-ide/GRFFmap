@@ -94,8 +94,7 @@ plot_theme <- function(p) {
     axis.title.y = element_text(size = 10),
     plot.title = element_text(hjust = 0),
     legend.justification = "center",
-    panel.spacing = unit(0, "lines"),
-    plot.margin = margin(t = 1, r = 2, b = 1, l = 2)
+    panel.spacing = unit(0, "lines")
   )
 }
 
@@ -180,7 +179,7 @@ plot_exceedance_combined <-function(exceed_prob, title_text, legend_title, shp =
   p
 }
 
-plot_layer_CI_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_water = shape_water, add_legend = TRUE) {
+plot_layer_CI_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = TRUE) {
   p <- ggplot() +
     geom_raster(aes(x = x, y = y, fill = p*100), data = p_long_df) +
     geom_sf(data = shp, linewidth = 0.2, fill = NA, color = "white") +
@@ -194,6 +193,14 @@ plot_layer_CI_combined <- function(p_long_df, title_text, shp = shape_Africa, sh
       clip = "on"
     )
   p <- plot_theme(p)
+  if (add_points) {
+    p <- p + geom_point(
+      aes(x = longitude, y = latitude, fill = p),  # p is already % units
+      data  = points_df %>% arrange(p),
+      shape = 21, colour = "darkgrey", size = 1.5, stroke = 0.2,
+      inherit.aes = FALSE
+    )
+  }
   if (!add_legend){
     p <- p + theme(legend.position = "none")
   }
@@ -219,8 +226,8 @@ plot_layer_CI_combined <- function(p_long_df, title_text, shp = shape_Africa, sh
 
 # --------------------------- Settings --------------------------------------
 # model parameters
-ell_km <- 120          # RFF length-scale in **kilometres**
-tau2   <- 0.5        # RW1 variance in feature space
+ell_km <- 80          # RFF length-scale in **kilometres**
+tau2   <- 0.1          # RW1 variance in feature space
 
 # prediction parameters
 nx <- 200
@@ -473,10 +480,15 @@ for (mut in all_who_mutations){
     
     # --- Create and print the three separate plots -----------------------------
     
-    plot_median_no_title_comb  <- plot_layer_combined(p_long_median, "", shape_Africa_crop, shape_water_crop, add_points = FALSE, add_legend = TRUE)
-    plot_exceed_5_no_title_comb <- plot_exceedance_combined(exceed_prob_long_5, "", legend_title =expression(Pr(Prevalence >= 5*"%")))
-    plot_CI_no_title_comb <- plot_layer_CI_combined(p_long_CI, "", shape_Africa_crop, shape_water_crop, add_legend = TRUE)
-      
+    plot_median_no_title_comb  <- plot_layer_combined(p_long_median, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE) +
+      theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
+    
+    plot_CI_no_title_comb <- plot_layer_CI_combined(p_long_CI, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE) +
+      theme(plot.margin = margin(t = -2, r = 2, b = -5, l = 2, unit = "pt"))
+    
+    plot_exceed_5_no_title_comb <- plot_exceedance_combined(exceed_prob_long_5, "", legend_title = expression(Pr(Prevalence >= 5*"%"))) +
+      theme(plot.margin = margin(t = -2, r = 2, b = 0,  l = 2, unit = "pt"))
+    
     prev_pred_exceed_5perc <- 
       ggdraw() +
       draw_label(
@@ -504,7 +516,7 @@ for (mut in all_who_mutations){
         width = 1,
         height = 0.95
       )
-    save_figs(file.path(OUT_COMBINED, paste0(mut, "_pred_prev_exceednace_5perc_no_title")), prev_pred_exceed_5perc, height = 14, width = 7)
+    save_figs(file.path(OUT_COMBINED, paste0(mut, "with_points_pred_prev_exceednace_5perc_no_title")), prev_pred_exceed_5perc, height = 14, width = 7)
     
     print(paste0("Saved figures for ", mut)) 
   }
