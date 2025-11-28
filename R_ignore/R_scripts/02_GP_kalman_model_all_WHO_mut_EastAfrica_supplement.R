@@ -53,8 +53,8 @@ exceed_prob_froms <- function(Pk, p_thr) {
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 120          # RFF length-scale in **kilometres**
-tau2   <- 0.5         # RW1 variance in feature space
+ell_km <- 80          # RFF length-scale in **kilometres**
+tau2   <- 0.1         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
@@ -68,11 +68,11 @@ jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 # prediction parameters
 nx <- 200
 ny <- 200
-t_vec <- 2012:2025
+t_vec <- 1995:2025
 t_num <- length(t_vec)
 
 # plotting parameters
-plot_times <- seq(2014, 2025, by = 1) # should be within t_vec
+plot_times <- seq(2012, 2025, by = 1) # should be within t_vec
 
 # posterior draws
 num_post_draws <- 500 
@@ -213,10 +213,10 @@ phi_of_coords <- function(S_km) {
 OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
 Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
 
-# Storage for means (and later, CIs) at plot_times
-# z_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-p_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-p_post_median <- array(NA, dim = c(nx, ny, length(plot_times)))
+# Storage for means (and later, CIs) at t_vec
+# z_post_mean <- array(NA, dim = c(nx, ny, length(t_vec)))
+p_post_mean <- array(NA, dim = c(nx, ny, length(t_vec)))
+p_post_median <- array(NA, dim = c(nx, ny, length(t_vec)))
 
 # uncertainty containers
 # z_post_sd   <- array(NA, dim = c(nx, ny, length(plot_times)))
@@ -257,7 +257,6 @@ for (i in 1:max_iter) {
   message(sprintf("\nEM iteration %d/%d", i, max_iter))
   
   # ===== E-step: Expected PG weights =======================================
-  #
   Omega_list <- vector("list", t_num)
   r_list     <- vector("list", t_num)
   
@@ -269,8 +268,7 @@ for (i in 1:max_iter) {
       n_t    <- ob$n
       kappa  <- ob$kappa
       
-      # Current linear predictor z_t(s) = μ + Φ w_t (current prev map)
-      # Phi_t is the weight at time t
+      # Current linear predictor z_t(s) = μ + Φ w_t
       z_t <- as.vector(mu_t + Phi_t %*% m_w[, ti])
       
       # Expected PG weights: E[ω] = (n / (2|z|)) * tanh(|z|/2)
@@ -361,38 +359,39 @@ for (i in 1:max_iter) {
   rel_change <- num / den
   
   message(sprintf("  pseudo-Gaussian log-lik: %.3f,  rel_change(w): %.3e", ll_sum, rel_change))
-}
-
-# ============================================================
-# Reconstruct z_t(s) and prevalence on lon/lat grid (for optional plotting)
-# ============================================================
-if (FALSE) {
   
-  for (k in seq_along(plot_times)) {
-    t_idx <- which(t_vec == plot_times[k])
+  # ============================================================
+  # Plot on-the-fly for checking
+  # ============================================================
+  
+  if (FALSE) {
     
-    # Mean z on grid
-    z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
-    
-    # Var[z] on grid: diag(Phi_full P_t Phi_full')
-    # Efficient diagonal via row-wise quadratic form:
-    #  V = rowSums( (Phi_full %*% P_t) * Phi_full )
-    P_t <- C_smooth[[t_idx]]
-    PhiP <- Phi_full %*% P_t               # [M x 2D]
-    z_var_vec <- rowSums(PhiP * Phi_full)  # elementwise product, row-sum
-    z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
-    
-    # Transform to prevalence and 95% pointwise intervals
-    p_mean_vec <- plogis(z_mean_vec)
-    p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
-    p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
-    
-    # Store as [nx x ny]
-    z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-    p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-    z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-    p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-    p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+    for (k in seq_along(plot_times)) {
+      t_idx <- which(t_vec == plot_times[k])
+      
+      # Mean z on grid
+      z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
+      
+      # Var[z] on grid: diag(Phi_full P_t Phi_full')
+      # Efficient diagonal via row-wise quadratic form:
+      #  V = rowSums( (Phi_full %*% P_t) * Phi_full )
+      P_t <- C_smooth[[t_idx]]
+      PhiP <- Phi_full %*% P_t               # [M x 2D]
+      z_var_vec <- rowSums(PhiP * Phi_full)  # elementwise product, row-sum
+      z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
+      
+      # Transform to prevalence and 95% pointwise intervals
+      p_mean_vec <- plogis(z_mean_vec)
+      p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
+      p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
+      
+      # Store as [nx x ny]
+      z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+      p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+      z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+    }
     
     # Long df for raster plotting (lon/lat axes)
     p_long <- do.call(rbind, lapply(seq_along(plot_times), function(k) {
@@ -414,6 +413,7 @@ if (FALSE) {
       ggtitle(sprintf("EM step %s", i))
     
     print(plot1)
+    
   }
 }
 
@@ -422,13 +422,13 @@ if (FALSE) {
 # ================================================
 
 # Storage:
-# - betas:  (2D x t_num x B)      feature-space trajectories
-# - ps:     (nx x ny x t_num x B) prevalence surfaces
-betas <- array(NA_real_, dim = c(2 * D, t_num, num_post_draws))
-ps    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
+# - beta_draws:  (2D x t_num x B)      feature-space trajectories
+# - p_draws:     (nx x ny x t_num x B) prevalence surfaces
+beta_draws <- array(NA_real_, dim = c(2 * D, t_num, num_post_draws))
+p_draws    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
 
 for (b in 1:num_post_draws) {
-  message(sprintf("...Posterior draw %s of %s", b, num_post_draws))
+  message(sprintf("Posterior draw %s of %s", b, num_post_draws))
   
   # --------------------------------------------
   # 1. Backward sampling in feature space (β_t)
@@ -467,7 +467,7 @@ for (b in 1:num_post_draws) {
   }
   
   # Store β path
-  betas[, , b] <- beta_b
+  beta_draws[, , b] <- beta_b
   
   # --------------------------------------------
   # 2. Map β_t path to full surfaces z(s,t), p(s,t)
@@ -477,7 +477,7 @@ for (b in 1:num_post_draws) {
     z_mat <- matrix(z_vec, nrow = nx, ncol = ny, byrow = FALSE)
     p_mat <- plogis(z_mat)
     
-    ps[, , ti, b] <- p_mat
+    p_draws[, , ti, b] <- p_mat
   }
 }
 
@@ -487,30 +487,24 @@ for (b in 1:num_post_draws) {
 p_thresh_list <- c("1" = 0.01, "5" = 0.05, "10" = 0.10)
 
 exceed_post_p_thresh <- array(
-  NA_real_, dim = c(nx, ny, length(plot_times), length(p_thresh_list))
+  NA_real_, dim = c(nx, ny, length(t_vec), length(p_thresh_list))
 )
 
 count <- 1
 for (p_thresh in p_thresh_list) {
   
-  exceed_post <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
-  
-  for (k in seq_along(plot_times)) {
-    exceed_post[, , k] <- apply(
-      ps[, , k, ],          # [nx, ny, ns]
-      MARGIN = c(1, 2),          # keep x,y; collapse draws
-      FUN = function(x) mean(x > p_thresh)
-    )
-  }
+  exceed_post <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
+    mean(x > p_thresh)
+  })
+  exceed_post <- array(exceed_post, dim = c(nx, ny, length(t_vec)))
   
   exceed_post_p_thresh[, , , count] <- exceed_post
   count <- count + 1
 }
 
-# --- Calculare mean, median and 95% CIs over posterior draws ----------------
-p_post_mean <- apply(ps, MARGIN = c(1, 2, 3), FUN = mean)
-p_post_median <- apply(ps, MARGIN = c(1, 2, 3), FUN = median)
-p_post_CI <- apply(ps, MARGIN = c(1, 2, 3), FUN = function(x) {
+p_post_mean = apply(p_draws, MARGIN = c(1, 2, 3), FUN = mean)
+p_post_median = apply(p_draws, MARGIN = c(1, 2, 3), FUN = median)
+p_post_CI <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
   diff(quantile(x, probs = c(0.025, 0.975)))
 })
 
@@ -518,7 +512,7 @@ p_post_CI <- apply(ps, MARGIN = c(1, 2, 3), FUN = function(x) {
 model_output <- list(
   p_post_mean = p_post_mean,
   p_post_median = p_post_median,
-  p_post_95_perc_CI = p_post_CI,
+  p_post_CI = p_post_CI,
   
   # Grid information
   xs = xs,
@@ -527,7 +521,7 @@ model_output <- list(
   lon_max = lon_max,
   lat_min = lat_min,
   lat_max = lat_max,
-  plot_times = plot_times,
+  t_vec = t_vec,
   
   # Original data
   data_subset = dat_sub,
