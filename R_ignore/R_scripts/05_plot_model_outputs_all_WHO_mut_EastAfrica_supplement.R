@@ -239,7 +239,7 @@ t_num <- length(t_vec)
 plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 
 # --------------------------- Load & filter data ----------------------------
-CACHE_DIR <- "R_ignore/R_scripts/outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
 
 OUT_COMBINED <- file.path("supplemental", "combined_pred_prev_exceedance_prob_grouped_year_kalman")
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_COMBINED)), 
