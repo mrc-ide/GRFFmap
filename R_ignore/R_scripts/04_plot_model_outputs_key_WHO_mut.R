@@ -34,6 +34,7 @@ make_raster_long <- function(arr3, xs, ys, plot_times) {
     )
   }))
   df %>%
+    dplyr::mutate(t = as.numeric(as.character(t))) %>%
     dplyr::filter(t %in% plot_times) %>%
     dplyr::mutate(t = factor(t, levels = plot_times))
 }
@@ -95,15 +96,15 @@ add_year_block <- function(df) {
 
 # --------------------------- Settings --------------------------------------
 # model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1          # RW1 variance in feature space
+ell_km <- ell_km_hat          # RFF length-scale in **kilometres**
+tau2   <- tau2_hat          # RW1 variance in feature space
 
 # inference parameters
-D        <- 300         # number of random frequencies (try 200–500)
-max_iter <- 5           # EM iterations
-z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
-omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
-jitter_S <- 1e-10       # diagonal jitter for innovation covariance
+# D        <- 300         # number of random frequencies (try 200–500)
+# max_iter <- 5           # EM iterations
+# z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
+# omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
+# jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
 nx <- 200
@@ -211,7 +212,8 @@ for (mut in all_who_mutations){
   
   dat_sub <- dat_with_k13 |>
     filter(mutation == mut) |>
-    filter(is.finite(numerator), is.finite(denominator), denominator > 0) |>
+    filter(is.finite(numerator), is.finite(denominator), denominator > 0,
+           ) |>
     mutate(
       longitude = as.numeric(longitude),
       latitude  = as.numeric(latitude)
@@ -289,6 +291,7 @@ for (mut in all_who_mutations){
   
   # --- Build long data for lower / mean / upper ------------------------------
   cached <- make_or_load(mut, ell_km, tau2)
+  cached <- readRDS("R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025_mean/k13_675_V_lenS371.310701892043_lenT0.410597976799481_full_model_output.rds")
   
   dim <- cached$p_post_median
   p_post_mean <- cached$p_post_mean
@@ -304,13 +307,13 @@ for (mut in all_who_mutations){
   exceed_prob_10 <- exceed_prob[ , , , 3]
   
   # --- Build long data for lower / mean / upper ------------------------------
-  p_long_median <- make_raster_long(p_post_median, xs, ys, t_vec)
-  p_long_mean <- make_raster_long(p_post_mean, xs, ys, t_vec)
-  p_long_CI <- make_raster_long(p_post_CI, xs, ys, t_vec)
+  p_long_median <- make_raster_long(p_post_median, xs, ys, plot_times)
+  p_long_mean <- make_raster_long(p_post_mean, xs, ys, plot_times)
+  p_long_CI <- make_raster_long(p_post_CI, xs, ys, plot_times)
   
-  exceed_prob_long_10 <- make_raster_long(exceed_prob_10, xs, ys, t_vec)
-  exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, t_vec)
-  exceed_prob_long_1 <- make_raster_long(exceed_prob_1, xs, ys, t_vec)
+  exceed_prob_long_10 <- make_raster_long(exceed_prob_10, xs, ys, plot_times)
+  exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, plot_times)
+  exceed_prob_long_1 <- make_raster_long(exceed_prob_1, xs, ys, plot_times)
   
   # --- Mask out sea as white background ------------------------------
   p_long_median <- mask_to_africa(p_long_median, africa_mask)
@@ -347,13 +350,13 @@ for (mut in all_who_mutations){
     )
   
   # --- Average exceed prob and pred prev every two years --------------------
-  p_long_median_avg_2y <- avg_2_year(p_long_median %>% filter(t %in% plot_times))
-  p_long_mean_avg_2y <- avg_2_year(p_long_mean %>% filter(t %in% plot_times))
-  p_long_CI_avg_2y <- avg_2_year(p_long_CI %>% filter(t %in% plot_times))
+  p_long_median_avg_2y <- avg_2_year(p_long_median)
+  p_long_mean_avg_2y <- avg_2_year(p_long_mean)
+  p_long_CI_avg_2y <- avg_2_year(p_long_CI)
   
-  exceed_prob_long_1_avg_2y <- avg_2_year(exceed_prob_long_1 %>% filter(t %in% plot_times))
-  exceed_prob_long_5_avg_2y <- avg_2_year(exceed_prob_long_5 %>% filter(t %in% plot_times))
-  exceed_prob_long_10_avg_2y <- avg_2_year(exceed_prob_long_10 %>% filter(t %in% plot_times))
+  exceed_prob_long_1_avg_2y <- avg_2_year(exceed_prob_long_1)
+  exceed_prob_long_5_avg_2y <- avg_2_year(exceed_prob_long_5)
+  exceed_prob_long_10_avg_2y <- avg_2_year(exceed_prob_long_10)
   
   points_df_2y <- add_year_block(points_df %>% filter(t %in% plot_times))
   
