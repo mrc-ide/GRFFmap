@@ -18,7 +18,7 @@ library(dplyr)
 library(fs)
 library(here)
 library(lwgeom) 
-library(gstat)
+# library(gstat)
 
 # Complete package
 load_all()
@@ -42,8 +42,8 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-# ell_km <- 80          # RFF length-scale in **kilometres**
-# tau2   <- 0.1         # RW1 variance in feature space
+ell_km <- 80          # RFF length-scale in **kilometres**
+tau2   <- 0.1         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
@@ -72,8 +72,7 @@ q_thr <- 0.80   # probability threshold for exceedance probability
 bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
-
-CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025_mean"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_model_output_key_WHO_mutations"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
@@ -132,9 +131,8 @@ all_who_mutations <- c("k13:comb",
                        "k13:561:H", 
                        "k13:441:L")
 
-# args <- commandArgs(trailingOnly = TRUE)
-# mut <- args[[1]]
-mut <- "k13:675:V"
+args <- commandArgs(trailingOnly = TRUE)
+mut <- args[[1]]
 
 # Per-mutation clock start
 mut_t0 <- Sys.time()
@@ -170,50 +168,9 @@ xy_km <- xy_m / 1000
 dat_sub$Xkm <- xy_km[, 1]
 dat_sub$Ykm <- xy_km[, 2]
 
-# --- Hyperparameter Optimization ----------------------------------------------
-# Variogram for ell_km 
-# Use a time window where we have decent coverage spatially
-dat_sp <- dat_sub |>
-  filter(year >= 2012, year <= 2020)
-
-vg_sp <- variogram(
-  z ~ 1,
-  locations = ~ Xkm + Ykm,
-  data = dat_sp,
-  cutoff = 1500,
-  width  = 25 
-)
-
-sill_hat <- max(vg_sp$gamma, na.rm = TRUE)
-
-# distance where gamma ≈ 0.95 * sill
-r_prac <- approx(
-  x = vg_sp$gamma,
-  y = vg_sp$dist,
-  xout = 0.95 * sill_hat,
-  rule = 2
-)$y
-
-ell_km_hat <- as.numeric(r_prac / 2.45)
-
-# Estiamtion for tau2
-dat_temporal <- dat_sub |>
-  arrange(Xkm, Ykm, year) |>
-  group_by(Xkm, Ykm) |>
-  mutate(
-    dz = z - dplyr::lag(z), 
-    dt = year - dplyr::lag(year)
-  ) |>
-  ungroup() |>
-  filter(!is.na(dz), dt == 1)  # only consecutive years
-
-sigma_eta2_hat <- median(dat_temporal$dz^2)  # robust to outliers
-
-tau2_hat <- as.numeric(sigma_eta2_hat)
-
 # --- Random Fourier Features --------------------------------------------------
 # Draw D frequencies ω_j ~ N(0, ℓ⁻² I₂), ℓ in **km**
-Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km_hat), ncol = 2)  # [D x 2]
+Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km), ncol = 2)  # [D x 2]
 
 # Helper to build feature matrix Φ(S) for coords S = [x_km, y_km] in km
 phi_of_coords <- function(S_km) {
@@ -289,7 +246,7 @@ for (ti in 1:t_num) {
 
 # --------------------------- State-space model -----------------------------
 # Random walk in feature space: w_t = w_{t-1} + ξ_t,  ξ_t ~ N(0, τ² I)
-Qw   <- Diagonal(2 * D, tau2_hat)
+Qw   <- Diagonal(2 * D, tau2)
 m_w  <- matrix(0, 2 * D, t_num)          # smoothed means (initially 0)
 m0_w <- rep(0, 2 * D)                    # prior mean
 C0_w <- Matrix(0, 2 * D, 2 * D, sparse = FALSE)  # prior covariance (zero variance, i.e. initial frequency known exactly)
@@ -648,14 +605,14 @@ model_output <- list(
   exceed_post_list = exceed_post_p_thresh,
   
   # Model settings
-  settings = list(ell_km = ell_km_hat, tau2 = tau2_hat, D = D)
+  settings = list(ell_km = ell_km, tau2 = tau2, D = D)
 )
 
 # Use your cache_path function to create a filename
 output_filename <- cache_path(
   mut = mut, 
-  lenS = ell_km_hat, 
-  lenT = tau2_hat, 
+  lenS = ell_km, 
+  lenT = tau2, 
   what = "full_model_output", 
   ext = "rds"
 )
