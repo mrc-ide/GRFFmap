@@ -18,6 +18,7 @@ library(dplyr)
 library(fs)
 library(here)
 library(lwgeom) 
+library(gstat)
 
 # Complete package
 load_all()
@@ -39,35 +40,23 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
   file.path(CACHE_DIR, fn)
 }
 
-# NA-robust row mean for 0/1 matrices
-.row_mean01 <- function(X01) {
-  Dk   <- rowSums(!is.na(X01))
-  succ <- rowSums(X01, na.rm = TRUE)
-  ifelse(Dk > 0L, succ / Dk, NA_real_)
-}
-
-# Per-time exceedance from draws: Pk is [M x D] (M = nx*ny)
-exceed_prob_froms <- function(Pk, p_thr) {
-  .row_mean01(Pk > p_thr)  # length M
-}
-
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1         # RW1 variance in feature space
+# ell_km <- 80          # RFF length-scale in **kilometres**
+# tau2   <- 0.1         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 100         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 200
-ny <- 200
+nx <- 100
+ny <- 100
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
@@ -143,8 +132,9 @@ all_who_mutations <- c("k13:comb",
                        "k13:561:H", 
                        "k13:441:L")
 
-args <- commandArgs(trailingOnly = TRUE)
-mut <- args[[1]]
+# args <- commandArgs(trailingOnly = TRUE)
+# mut <- args[[1]]
+mut <- "k13:675:V"
 
 # Per-mutation clock start
 mut_t0 <- Sys.time()
@@ -152,7 +142,11 @@ mut_t0 <- Sys.time()
 # --------------------------- Run spatiotemporal ----------------------------
 dat_sub <- dat_with_k13 |>
   filter(mutation == mut) |>
-  filter(is.finite(numerator), is.finite(denominator), denominator > 0)
+  filter(is.finite(numerator), is.finite(denominator), denominator > 0) |>
+  mutate(
+    p_hat = (numerator + 0.5) / (denominator + 1),
+    z     = qlogis(p_hat)
+  )
 
 # --------------------------- Project to local Cartesian (km) ---------------
 # Center projection on study area for good local properties
@@ -176,9 +170,50 @@ xy_km <- xy_m / 1000
 dat_sub$Xkm <- xy_km[, 1]
 dat_sub$Ykm <- xy_km[, 2]
 
-# --------------------------- Random Fourier Features -----------------------
+# --- Hyperparameter Optimization ----------------------------------------------
+# Variogram for ell_km 
+# Use a time window where we have decent coverage spatially
+dat_sp <- dat_sub |>
+  filter(year >= 2012, year <= 2020)
+
+vg_sp <- variogram(
+  z ~ 1,
+  locations = ~ Xkm + Ykm,
+  data = dat_sp,
+  cutoff = 1500,
+  width  = 25 
+)
+
+sill_hat <- max(vg_sp$gamma, na.rm = TRUE)
+
+# distance where gamma ≈ 0.95 * sill
+r_prac <- approx(
+  x = vg_sp$gamma,
+  y = vg_sp$dist,
+  xout = 0.95 * sill_hat,
+  rule = 2
+)$y
+
+ell_km_hat <- as.numeric(r_prac / 2.45)
+
+# Estiamtion for tau2
+dat_temporal <- dat_sub |>
+  arrange(Xkm, Ykm, year) |>
+  group_by(Xkm, Ykm) |>
+  mutate(
+    dz = z - dplyr::lag(z), 
+    dt = year - dplyr::lag(year)
+  ) |>
+  ungroup() |>
+  filter(!is.na(dz), dt == 1)  # only consecutive years
+
+sigma_eta2_hat <- median(dat_temporal$dz^2)  # robust to outliers
+
+tau2_hat <- as.numeric(sigma_eta2_hat)
+
+# --- Random Fourier Features --------------------------------------------------
 # Draw D frequencies ω_j ~ N(0, ℓ⁻² I₂), ℓ in **km**
-Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km), ncol = 2)  # [D x 2]
+Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km_hat), ncol = 2)  # [D x 2]
 
 # Helper to build feature matrix Φ(S) for coords S = [x_km, y_km] in km
 phi_of_coords <- function(S_km) {
@@ -254,7 +289,7 @@ for (ti in 1:t_num) {
 
 # --------------------------- State-space model -----------------------------
 # Random walk in feature space: w_t = w_{t-1} + ξ_t,  ξ_t ~ N(0, τ² I)
-Qw   <- Diagonal(2 * D, tau2)
+Qw   <- Diagonal(2 * D, tau2_hat)
 m_w  <- matrix(0, 2 * D, t_num)          # smoothed means (initially 0)
 m0_w <- rep(0, 2 * D)                    # prior mean
 C0_w <- Matrix(0, 2 * D, 2 * D, sparse = FALSE)  # prior covariance (zero variance, i.e. initial frequency known exactly)
@@ -613,14 +648,14 @@ model_output <- list(
   exceed_post_list = exceed_post_p_thresh,
   
   # Model settings
-  settings = list(ell_km = ell_km, tau2 = tau2, D = D)
+  settings = list(ell_km = ell_km_hat, tau2 = tau2_hat, D = D)
 )
 
 # Use your cache_path function to create a filename
 output_filename <- cache_path(
   mut = mut, 
-  lenS = ell_km, 
-  lenT = tau2, 
+  lenS = ell_km_hat, 
+  lenT = tau2_hat, 
   what = "full_model_output", 
   ext = "rds"
 )
