@@ -16,31 +16,26 @@ load_all()
 
 set.seed(1)
 
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet")) {
+cache_path <- function(mut, what, ext = c("rds","parquet")) {
   ext <- match.arg(ext)
   fn  <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                 gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
+                 gsub("[:/ ]", "_", mut), what, ext)
   file.path(CACHE_DIR, fn)
 }
 
-make_raster_long <- function(arr3, xs, ys, plot_times) {
-  nx <- length(xs); ny <- length(ys)
-  df <- do.call(rbind, lapply(seq_along(plot_times), function(k) {
+make_raster_long <- function(arr3, xs, ys, times) {
+  do.call(rbind, lapply(seq_along(times), function(k) {
     data.frame(
       x = rep(xs, times = ny),
       y = rep(ys, each  = nx),
-      p = as.vector(arr3[ , , k]),
-      t = plot_times[k]
+      p = as.vector(arr3[, , k]),
+      t = factor(times[k], levels = times)
     )
   }))
-  df %>%
-    dplyr::mutate(t = as.numeric(as.character(t))) %>%
-    dplyr::filter(t %in% plot_times) %>%
-    dplyr::mutate(t = factor(t, levels = plot_times))
 }
 
 make_or_load <- function(mut, ell_km, tau2) {
-  cached_rds <- cache_path(mut, ell_km, tau2, "full_model_output", "rds") 
+  cached_rds <- cache_path(mut, "optimized_ell_tau2_full_model_output", "rds") 
   stopifnot(file_exists(cached_rds))
   readRDS(cached_rds)
 }
@@ -96,8 +91,8 @@ add_year_block <- function(df) {
 
 # --------------------------- Settings --------------------------------------
 # model parameters
-ell_km <- ell_km_hat          # RFF length-scale in **kilometres**
-tau2   <- tau2_hat          # RW1 variance in feature space
+ell_km <- 120         # RFF length-scale in **kilometres**
+tau2   <- 0.5
 
 # inference parameters
 # D        <- 300         # number of random frequencies (try 200–500)
@@ -107,8 +102,8 @@ tau2   <- tau2_hat          # RW1 variance in feature space
 # jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 200
-ny <- 200
+nx <- 100
+ny <- 100
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
@@ -117,7 +112,7 @@ plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 t_win <- 2           # window around each facet time (years). Points within this window are displayed
 
 # --------------------------- Load & filter data ----------------------------
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
 
 OUT_DIR <- "R_ignore/R_scripts/outputs/plots/key_k13_mutations"
 dir_create(OUT_DIR)
@@ -291,7 +286,7 @@ for (mut in all_who_mutations){
   
   # --- Build long data for lower / mean / upper ------------------------------
   cached <- make_or_load(mut, ell_km, tau2)
-  cached <- readRDS("R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025_mean/k13_675_V_lenS371.310701892043_lenT0.410597976799481_full_model_output.rds")
+  cached <- readRDS("R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations/k13_675_V_lenS120_lenT0.5_full_model_output.rds")
   
   dim <- cached$p_post_median
   p_post_mean <- cached$p_post_mean
@@ -307,31 +302,33 @@ for (mut in all_who_mutations){
   exceed_prob_10 <- exceed_prob[ , , , 3]
   
   # --- Build long data for lower / mean / upper ------------------------------
-  p_long_median <- make_raster_long(p_post_median, xs, ys, plot_times)
-  p_long_mean <- make_raster_long(p_post_mean, xs, ys, plot_times)
-  p_long_CI <- make_raster_long(p_post_CI, xs, ys, plot_times)
+  plot_idx <- match(plot_times, t_vec)  # indices in 1:t_num
+
+  p_long_median <- make_raster_long(p_post_median[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+  p_long_mean <- make_raster_long(p_post_mean[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+  p_long_CI <- make_raster_long(p_post_CI[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
   
-  exceed_prob_long_10 <- make_raster_long(exceed_prob_10, xs, ys, plot_times)
-  exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, plot_times)
-  exceed_prob_long_1 <- make_raster_long(exceed_prob_1, xs, ys, plot_times)
+  exceed_prob_long_10 <- make_raster_long(exceed_prob_10[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+  exceed_prob_long_5 <- make_raster_long(exceed_prob_5[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+  exceed_prob_long_1 <- make_raster_long(exceed_prob_1[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
   
-  # --- Mask out sea as white background ------------------------------
-  p_long_median <- mask_to_africa(p_long_median, africa_mask)
-  p_long_mean <- mask_to_africa(p_long_mean, africa_mask)
-  p_long_CI <- mask_to_africa(p_long_CI, africa_mask)
-  
-  exceed_probdraws_long_10 <- mask_to_africa(exceed_prob_long_10, africa_mask)
-  exceed_prob_long_5  <- mask_to_africa(exceed_prob_long_5, africa_mask)
-  exceed_prob_long_1  <- mask_to_africa(exceed_prob_long_1, africa_mask) 
-  
-  # --- Crop dataframes to bbox ------------------------------
-  p_long_median   <- crop_long_df(p_long_median, xlim, ylim)
-  p_long_mean   <- crop_long_df(p_long_mean, xlim, ylim)
-  p_long_CI   <- crop_long_df(p_long_CI, xlim, ylim)
-  
-  exceed_prob_long_10 <- crop_long_df(exceed_prob_long_10, xlim, ylim)
-  exceed_prob_long_5  <- crop_long_df(exceed_prob_long_5,  xlim, ylim)
-  exceed_prob_long_1  <- crop_long_df(exceed_prob_long_1,  xlim, ylim)
+  # # --- Mask out sea as white background ------------------------------
+  # p_long_median <- mask_to_africa(p_long_median, africa_mask)
+  # p_long_mean <- mask_to_africa(p_long_mean, africa_mask)
+  # p_long_CI <- mask_to_africa(p_long_CI, africa_mask)
+  # 
+  # exceed_probdraws_long_10 <- mask_to_africa(exceed_prob_long_10, africa_mask)
+  # exceed_prob_long_5  <- mask_to_africa(exceed_prob_long_5, africa_mask)
+  # exceed_prob_long_1  <- mask_to_africa(exceed_prob_long_1, africa_mask) 
+  # 
+  # # --- Crop dataframes to bbox ------------------------------
+  # p_long_median   <- crop_long_df(p_long_median, xlim, ylim)
+  # p_long_mean   <- crop_long_df(p_long_mean, xlim, ylim)
+  # p_long_CI   <- crop_long_df(p_long_CI, xlim, ylim)
+  # 
+  # exceed_prob_long_10 <- crop_long_df(exceed_prob_long_10, xlim, ylim)
+  # exceed_prob_long_5  <- crop_long_df(exceed_prob_long_5,  xlim, ylim)
+  # exceed_prob_long_1  <- crop_long_df(exceed_prob_long_1,  xlim, ylim)
   
   # --- Create observed data points ------------------------------
   points_df <- dat_sub %>%
