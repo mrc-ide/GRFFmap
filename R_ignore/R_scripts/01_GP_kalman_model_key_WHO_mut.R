@@ -18,7 +18,8 @@ library(dplyr)
 library(fs)
 library(here)
 library(lwgeom) 
-# library(gstat)
+library(spacetime)
+library(gstat)
 
 # Complete package
 load_all()
@@ -42,21 +43,21 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 120          # RFF length-scale in **kilometres**
-tau2   <- 0.5         # RW1 variance in feature space
+# ell_km <- 120          # RFF length-scale in **kilometres**
+# tau2   <- 0.5         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 100         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 200
-ny <- 200
+nx <- 100
+ny <- 100
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
@@ -72,13 +73,13 @@ q_thr <- 0.80   # probability threshold for exceedance probability
 bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
-CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_model_output_key_WHO_mutations"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(longitude, latitude, year, numerator, denominator, prevalence, mutation)
+  select(longitude, latitude, year, numerator, denominator, prevalence, mutation) 
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
@@ -98,7 +99,7 @@ bbox_east_africa <- st_bbox(c(
 # Using the cropped Admin 1 data for East Africa
 admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
 
-# --------------------------- Add K13 overall data ----------------------------
+# --- Add K13 overall data -----------------------------------------------------
 k13_any_site_year <- dat %>%
   # keep only K13 mutations; adjust this filter to your naming convention
   filter(grepl("^k13", mutation, ignore.case = TRUE)) %>%
@@ -123,21 +124,15 @@ dat_with_k13 <- dat %>%
   bind_rows(k13_any_site_year) %>%
   arrange(year, longitude, latitude, mutation)
 
-# --------------------------- Define K13 mutants ----------------------------
-# which mutation we are focusing on
-all_who_mutations <- c("k13:comb", 
-                       "k13:675:V", 
-                       "k13:622:I", 
-                       "k13:561:H", 
-                       "k13:441:L")
-
+# --- Define K13 mutants -------------------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
-mut <- args[[1]]
+# mut <- args[[1]]
+mut <- "k13:675:V"
 
 # Per-mutation clock start
 mut_t0 <- Sys.time()
 
-# --------------------------- Run spatiotemporal ----------------------------
+# --- Filter data based on mutation --------------------------------------------
 dat_sub <- dat_with_k13 |>
   filter(mutation == mut) |>
   filter(is.finite(numerator), is.finite(denominator), denominator > 0) |>
@@ -146,7 +141,7 @@ dat_sub <- dat_with_k13 |>
     z     = qlogis(p_hat)
   )
 
-# --------------------------- Project to local Cartesian (km) ---------------
+# --- Project to local Cartesian (km) ------------------------------------------
 # Center projection on study area for good local properties
 lon0 <- median(dat_sub$longitude, na.rm = TRUE)
 lat0 <- median(dat_sub$latitude,  na.rm = TRUE)
@@ -168,6 +163,160 @@ xy_km <- xy_m / 1000
 dat_sub$Xkm <- xy_km[, 1]
 dat_sub$Ykm <- xy_km[, 2]
 
+# ==============================================================================
+# Variogram analysis to identify optimal length space parameter (ell_km) 
+# and temporal variance (tau2)
+# ==============================================================================
+
+# --- Spatial variogram to estimate the spatial length-scale ell_km ------------
+# Construct a spatiotemporal object (STIDF) from the data subset
+# Spatial coordinates in kilometres (projected coordinates)
+sp_pts <- sp::SpatialPoints(dat_sub[, c("Xkm", "Ykm")])
+
+# Create time index where time is treated as numeric across all years in dat_sub
+time_idx <- as.POSIXct(paste0(dat_sub$year, "-07-01"), tz = "UTC")
+
+# Combine spatial points + time index + observed values into a spacetime object
+st_obj <- spacetime::STIDF(sp_pts, time_idx, data = data.frame(z = dat_sub$z))
+
+# Compute spatiotemporal variogram, then isolate the ~1-year temporal slice
+# Small tolerance around 365 days to catch "approximately one year apart" pairs
+eps_days <- 0.5
+
+# Compute spatiotemporal variogram
+vg_st_1year <- variogramST(
+  z ~ 1,
+  data   = st_obj,
+  tlags  = c(365 - eps_days, 365 + eps_days, 3 * 365),  # boundaries for ≤2 years
+  tunit  = "days",
+  cutoff = 1500,
+  width  = 25
+)
+
+# Extract only the ~1-year temporal lag bin
+vg_1y <- subset(vg_st_1year, timelag == 365)
+# Keep only spatial variogram columns
+vg_1y_sp <- vg_1y[, c("dist", "gamma", "np")]
+
+# Defensive casting to numeric (variogramST output can sometimes be factor-like)
+vg_1y_sp$dist  <- as.numeric(vg_1y_sp$dist)
+vg_1y_sp$gamma <- as.numeric(vg_1y_sp$gamma)
+vg_1y_sp$np    <- as.numeric(vg_1y_sp$np)
+
+# Assign gstat variogram class so gstat plotting/fitting methods work
+class(vg_1y_sp) <- c("gstatVariogram", "data.frame")
+# Quick diagnostic plot of the empirical spatial variogram at ~1-year lag
+plot(vg_1y_sp)
+
+# Fit a parametric variogram model to estimate the spatial range parameter
+# Reasonable starting values
+nugget0 <- min(vg_1y_sp$gamma)
+psill0  <- max(vg_1y_sp$gamma) - nugget0
+range0  <- 500
+
+# Initialize a Gaussian variogram model
+vgm_init <- vgm(
+  psill  = psill0,
+  model  = "Gau",
+  range  = range0,
+  nugget = nugget0
+)
+
+# Fit the model to the empirical variogram points
+vgm_fit <- fit.variogram(vg_1y_sp, vgm_init)
+
+# Extract fitted Gaussian range parameter (gstat’s "range" for model "Gau")
+a_hat  <- vgm_fit$range[vgm_fit$model == "Gau"]
+
+# Convert gstat Gaussian range parameter to an RFF-style length-scale ell
+ell_km_hat <- a_hat / sqrt(2)
+
+# Plot empirical variogram points with fitted model curve overlay
+plot(
+  gamma ~ dist,
+  data = vg_1y_sp,
+  xlab = "Distance (km)",
+  ylab = "Semivariance",
+  main = "Empirical variogram (≈1-year pairs) with exponential fit",
+  pch = 1
+)
+
+# Create a smooth model-implied variogram curve across the observed distances
+vg_line <- variogramLine(
+  vgm_fit,
+  maxdist = max(vg_1y_sp$dist),
+  n = 200
+)
+
+# Overlay fitted variogram curve
+lines(vg_line$dist, vg_line$gamma, lwd = 2, col = "black")
+
+# --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
+
+# Extract time index from spatiotemporal object
+t_idx <- spacetime::index(st_obj@time)
+# Maximum temporal separation across all observation pairs (in days)
+max_lag_days <- as.numeric(diff(range(t_idx)), units = "days")
+
+# Define temporal lag bins from 0 to maximum lag; here we bin by 180 days = 6 months
+tlags_days <- seq(0, max_lag_days, by = 180)
+
+# Compute spatiotemporal variogram
+vg_st_time <- variogramST(
+  z ~ 1,
+  data   = st_obj,
+  tlags  = tlags_days,  # covers ALL time lags in your data
+  tunit  = "days",
+  cutoff = 25,          # only pairs with distance ≤ 50 km
+  width  = 25           # 1 spatial bin: [0, 50) km
+)
+
+# Sanity check: should be a single spatial bin (~25 km midpoint)
+unique(vg_st_time$dist)
+
+# Extract temporal variogram (collapse spatial dimension)
+vg_t <- vg_st_time[, c("timelag", "gamma", "np")]
+names(vg_t)[names(vg_t) == "timelag"] <- "dist"   # rename for gstat
+
+# Remove bins with undefined or non-finite estimates
+vg_t <- vg_t[is.finite(vg_t$dist) & is.finite(vg_t$gamma), ]
+
+# Ensure numeric columns (defensive programming)
+vg_t$dist  <- as.numeric(vg_t$dist)   # time lag in days
+vg_t$gamma <- as.numeric(vg_t$gamma)
+vg_t$np    <- as.numeric(vg_t$np)
+
+# Set class so gstat methods (plot, fit.variogram, etc.) work correctly
+class(vg_t) <- c("gstatVariogram", "data.frame")
+
+# Visual inspection of temporal variogram
+plot(gamma ~ dist, data = vg_t,
+     xlab = "Time lag (days)", ylab = "Semivariance",
+     main = "Temporal variogram (pairs ≤ 25 km)")
+
+# Estimate RW variance via weighted linear regression (model: gamma(h) = 0.5 * tau^2 * h)
+lm_rw0 <- lm(gamma ~ 0 + dist, data = vg_t, weights = np)
+summary(lm_rw0)
+
+# Estimated slope
+b_hat <- coef(lm_rw0)[["dist"]]   # slope
+
+# Convert slope to RW variance parameter
+tau2_hat_day <- 2 * b_hat
+tau2_hat <- tau2_hat_day * 365
+
+# Final plot with fitted line
+plot(gamma ~ dist, data = vg_t,
+     xlab = "Time lag (days)", ylab = "Semivariance",
+     main = "Temporal variogram with line anchored at 0")
+abline(a = 0, b = b_hat, lwd = 2)
+
+# ==============================================================================
+# Spatiotemporal model
+# ==============================================================================
+tau2 <- tau2_hat
+ell_km <- ell_km_hat
+
 # --- Random Fourier Features --------------------------------------------------
 # Draw D frequencies ω_j ~ N(0, ℓ⁻² I₂), ℓ in **km**
 Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km), ncol = 2)  # [D x 2]
@@ -178,8 +327,7 @@ phi_of_coords <- function(S_km) {
   cbind(cos(OS), sin(OS)) * (1 / sqrt(D))            # (n x 2D)
 }
 
-# --------------------------- Create grid for prediction -----------------------
-
+# --- Create grid for prediction ---------------------------------------------------
 # Define xlim and ylim for each mutation
 if (mut == "k13:675:V"){
   xlim = c(28, 37)
@@ -227,7 +375,7 @@ z_post_sd   <- array(NA, dim = c(nx, ny, length(t_vec)))
 p_post_lo   <- array(NA, dim = c(nx, ny, length(t_vec)))
 p_post_hi   <- array(NA, dim = c(nx, ny, length(t_vec)))
 
-# --------------------------- Organize by time ------------------------------
+# --- Organize by time ---------------------------------------------------------
 # For each time index, collect projected coords and Binomial stats
 
 obs_by_t <- vector("list", t_num)
@@ -611,9 +759,7 @@ model_output <- list(
 # Use your cache_path function to create a filename
 output_filename <- cache_path(
   mut = mut, 
-  lenS = ell_km, 
-  lenT = tau2, 
-  what = "full_model_output", 
+  what = "optimized_ell_tau2_full_model_output", 
   ext = "rds"
 )
 
