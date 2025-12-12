@@ -42,21 +42,21 @@ cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz"))
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1         # RW1 variance in feature space
+ell_km <- 120          # RFF length-scale in **kilometres**
+tau2   <- 0.5         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 100         # number of random frequencies (try 200–500)
+D        <- 500         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 100
-ny <- 100
+nx <- 200
+ny <- 200
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
