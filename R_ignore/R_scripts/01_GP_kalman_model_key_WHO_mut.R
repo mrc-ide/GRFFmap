@@ -34,10 +34,12 @@ t0 <- Sys.time()
 
 # --- Helper Function ----------------------------------------------------------
 # Build consistent filenames per (mutation, length_space, length_time, n_features)
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz")) {
+cache_path <- function(mut, what, ext = c("rds", "parquet", "rds.gz")) {
   ext <- match.arg(ext)
-  fn <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
+  fn  <- sprintf("%s_%s.%s",
+                 gsub("[:/ ]", "_", mut),
+                 what,
+                 ext)
   file.path(CACHE_DIR, fn)
 }
 
@@ -49,15 +51,15 @@ p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 100         # number of random frequencies (try 200–500)
+D        <- 500         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 100
-ny <- 100
+nx <- 200
+ny <- 200
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
