@@ -15,21 +15,7 @@ load_all()
 sf_use_s2(FALSE)
 set.seed(1)
 
-# --- Helper Function ----------------------------------------------------------
-# build consistent filenames per (mutation, length_space, length_time, n_features)
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz")) {
-  ext <- match.arg(ext)
-  fn <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
-  file.path(CACHE_DIR, fn)
-}
-
-# load rds model output
-make_or_load <- function(mut, ell_km, tau2) {
-  cached_rds <- cache_path(mut, ell_km, tau2, "full_model_output", "rds") 
-  stopifnot(file_exists(cached_rds))
-  readRDS(cached_rds)
-}
+# --- Define country based palette ----------------------------------------------------------
 
 # base color palette for countries (will be repeated/trimmed as needed)
 country_base_cols <- c(
@@ -39,40 +25,32 @@ country_base_cols <- c(
   "#D55E00","#CC79A7","#9A6324","#800000"
 )
 
-# --------------------------- Settings --------------------------------------
-plot_times    <- seq(2012, 2025, by = 1)
-ell_km        <- 80
-tau2          <- 0.1
-n_post_draws  <- 100
-prev_cutoff   <- 0.05   # threshold for time series
-
-CACHE_DIR     <- "R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual_2012_2025"
-OUT_BASE      <- "GRFF_updated_maps"
-OUT_PLOT_DIR  <- "time_series"
+# --- Define cache and output directory ----------------------------------------
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
+OUT_PLOT_DIR <- "time_series"
 
 dir_create(c(
   file.path("R_ignore/R_scripts/outputs/plots", OUT_PLOT_DIR)
 ))
 
-# --- Load & filter data -------------------------------------------------------
-# Load prevalence data
+# --- Load data ----------------------------------------------------------------
 dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day))
 
+# --- Filter data --------------------------------------------------------------
 # Load Africa Shape file
 africa_shp_admin1 <- readRDS("R_ignore/R_scripts/data/sf_admin1_africa.rds")
+
+# --- Settings -----------------------------------------------------------------
+plot_times    <- seq(2012, 2025, by = 1)
+prev_cutoff   <- 0.05   # threshold for time series
 
 # --- Fix shapes ---------------------------------------------------------------
 target_crs <- 4326
 africa_shp_admin1 <- st_transform(africa_shp_admin1, crs = target_crs)
 
 # Define East Africa box and crop Admin1 shapefile
-bbox_east_africa <- st_bbox(c(
-  xmin = 28.48,
-  xmax = 48.43,
-  ymin = -4.6,
-  ymax = 15.29
-), crs = target_crs)
+bbox_east_africa <- get_east_africa_bbox(target_crs)
 
 # Using the cropped Admin 1 data for East Africa
 admin1_regions <- africa_shp_admin1 |>
@@ -100,7 +78,7 @@ for (mut in all_who_mutations){
   }
   
   # load cached model output
-  cached <- make_or_load(mut, ell_km, tau2)
+  cached <- make_or_load(mut)
   xs <- cached$xs
   ys <- cached$ys
   df_posterior_timeseries <- cached$time_series
@@ -162,13 +140,13 @@ for (mut in all_who_mutations){
       legend.position = "none"
     )
   
-  save_figs(
-    file.path(OUT_PLOT_DIR, paste0(mut, "_country_prev_draws")),
-    annual_prev_plot_country,
-    width = 10
-  )
+  # save_figs(
+  #   file.path(OUT_PLOT_DIR, paste0(mut, "_country_prev_draws")),
+  #   annual_prev_plot_country,
+  #   width = 10
+  # )
   
-  # --- Plot 2: Only countries where prevalence ever exceeds cutoff ------------
+  # --- Plot 2: Plot only countries where prevalence ever exceeds cutoff ------------
   # which countries ever exceed prev_cutoff at region level
   select_countries <- admin1_time_series_final |>
     filter(mean_prevalence > prev_cutoff) |>
@@ -219,7 +197,8 @@ for (mut in all_who_mutations){
     ) +
     facet_wrap(~ name_0) +
     scale_color_manual(values = my_colors) +
-    scale_fill_manual(values  = my_colors) +
+    scale_fill_manual(values  = my_colors,
+                      name = "Country") +
     scale_x_continuous(
       breaks = seq(
         from = min(adm1_timeseries_bycountry_data$t),
@@ -232,21 +211,11 @@ for (mut in all_who_mutations){
       y     = "Prevalence",
       title = clean_mut
     ) +
-    theme_bw() +
-    theme(
-      strip.background = element_rect(fill = "white", color = NA),
-      strip.text       = element_text(color = "black", face = "plain", size = 10),
-      panel.border     = element_rect(color = "grey80", fill = NA),
-      legend.title     = element_text(size = 10),
-      legend.text      = element_text(size = 8),
-      title            = element_text(size = 12),
-      axis.text.x      = element_text(size = 8, angle = 30, hjust = 1),
-      axis.text.y      = element_text(size = 8),
-      axis.title.x     = element_text(size = 10),
-      axis.title.y     = element_text(size = 10),
-      plot.title       = element_text(hjust = 0),
-      legend.position  = "none"
-    )
+    theme_bw() + 
+    theme(legend.position = "None")
+  
+  annual_prev_larger_plot_country <- plot_theme(annual_prev_larger_plot_country)
+  
   
   save_figs(
     file.path(OUT_PLOT_DIR, paste0(mut, "_country_prev_larger_", prev_cutoff, "_draws")),
@@ -257,14 +226,3 @@ for (mut in all_who_mutations){
   
   fig5_plots[[mut]] <- annual_prev_larger_plot_country
 }
-
-##### Combine all TimeSeries plots into Figure5 with Cow Plot 
-panelA <- fig5_plots[["k13:675:V"]]
-panelB <- fig5_plots[["k13:561:H"]]
-panelC <- fig5_plots[["k13:622:I"]]
-Fig5 <- plot_grid(panelA, panelB, panelC, ncol = 1, align = "v",
-                  labels = c("A","B","C"), label_size = 14)
-
-save_figs(file.path(OUT_PLOT_DIR, paste0("Fig5_combined_plot_", prev_cutoff, "_draws")), Fig5, width = 8, height = 10)
-
-save_figs(file.path(OUT_PLOT_DIR, paste0("Fig5_combined_plot_LARGE_", prev_cutoff, "_draws")), Fig5, width = 15, height = 15)
