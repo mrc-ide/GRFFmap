@@ -18,86 +18,6 @@ load_all()
 
 set.seed(1)
 
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet")) {
-  ext <- match.arg(ext)
-  fn  <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                 gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
-  file.path(CACHE_DIR, fn)
-}
-
-make_raster_long <- function(arr3, xs, ys, t_vec, plot_times) {
-  nx <- length(xs); ny <- length(ys)
-  df <- do.call(rbind, lapply(seq_along(t_vec), function(k) {
-    data.frame(
-      x = rep(xs, times = ny),
-      y = rep(ys, each  = nx),
-      p = as.vector(arr3[ , , k]),
-      t = t_vec[k]
-    )
-  }))
-  df %>%
-    dplyr::filter(t %in% plot_times) %>%
-    dplyr::mutate(t = factor(t, levels = plot_times))
-}
-
-make_or_load <- function(mut, ell_km, tau2) {
-  cached_rds <- cache_path(mut, ell_km, tau2, "full_model_output", "rds") 
-  stopifnot(file_exists(cached_rds))
-  readRDS(cached_rds)
-}
-
-crop_long_df <- function(df, xlim, ylim) {
-  dplyr::filter(df, x >= xlim[1], x <= xlim[2], y >= ylim[1], y <= ylim[2])
-}
-
-mask_to_africa <- function(df, africa_mask) {
-  pts <- sf::st_as_sf(df, coords = c("x","y"), crs = 4326, remove = FALSE)
-  inside <- lengths(sf::st_intersects(pts, africa_mask)) > 0  # sparse = TRUE by default
-  df$p[!inside] <- NA_real_
-  df
-}
-
-posterior_se_fast <- function(draw_list) {
-  # draw_list: list of identical-dimension arrays/matrices
-  
-  # 1. Stack draws along last dimension
-  arr <- simplify2array(draw_list)        # dims: (d1, d2, ..., dK, D)
-  dims <- dim(arr)
-  D <- dims[length(dims)]
-  
-  # 2. Reshape into a matrix: pixels × draws
-  mat <- matrix(arr, 
-                nrow = prod(dims[-length(dims)]),
-                ncol = D)
-  
-  # 3. Compute SD row-wise very efficiently
-  sd_vec <- rowSds(mat)
-  
-  # 4. Standard error = SD / sqrt(D)
-  se_vec <- sd_vec / sqrt(D)
-  
-  # 5. Reshape back to original spatial shape
-  array(se_vec, dim = dims[-length(dims)])
-}
-
-plot_theme <- function(p) {
-  p + theme(
-    strip.background = element_rect(fill = "white", color = NA),
-    strip.text = element_text(color = "black", face = "plain"),
-    panel.border = element_rect(color = "grey80", fill = NA),
-    legend.title = element_text(size = 10),
-    legend.text = element_text(size = 8),
-    title = element_text(size = 12),
-    axis.text.x = element_text(size = 8, angle = 30, hjust = 1),
-    axis.text.y = element_text(size = 8),
-    axis.title.x = element_text(size = 10),
-    axis.title.y = element_text(size = 10),
-    plot.title = element_text(hjust = 0),
-    legend.justification = "center",
-    panel.spacing = unit(0, "lines")
-  )
-}
-
 plot_layer_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = TRUE) {
   p <- ggplot() +
     geom_raster(aes(x = x, y = y, fill = p*100), data = p_long_df) +
@@ -114,7 +34,7 @@ plot_layer_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_w
   p <- plot_theme(p)
   if (add_points) {
     p <- p + geom_point(
-      aes(x = longitude, y = latitude, fill = p),  # p is already % units
+      aes(x = longitude, y = latitude, fill = p), 
       data  = points_df %>% arrange(p),
       shape = 21, colour = "darkgrey", size = 1.5, stroke = 0.2,
       inherit.aes = FALSE
@@ -131,8 +51,8 @@ plot_layer_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_w
   if (title_text != ""){
     p <- p + labs(title = title_text)
   }
-  p <- p + scale_fill_gradientn(colours = pp_cols,
-                                values  = pp_vals,
+  p <- p + scale_fill_gradientn(colours = prev_colors(),
+                                values  = prev_vals(),
                                 limits = c(0, 100), 
                                 name = "Prevalence (%)",
                                 breaks = seq(0, 100, by = 10),
@@ -147,7 +67,7 @@ plot_exceedance_combined <-function(exceed_prob, title_text, legend_title, shp =
     theme_bw() +
     annotate(
       "rect",
-      xmin = xlim[1], xmax = xlim[2],
+      xmin = mut_lims[[1]][1], xmax = mut_lims[[1]][2],
       ymin = ylim[1], ymax = ylim[2],
       fill = "white", colour = NA
     ) +
@@ -224,11 +144,7 @@ plot_layer_CI_combined <- function(p_long_df, title_text, shp = shape_Africa, sh
   p
 }
 
-# --------------------------- Settings --------------------------------------
-# model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1          # RW1 variance in feature space
-
+# --- Settings -----------------------------------------------------------------
 # prediction parameters
 nx <- 200
 ny <- 200
@@ -238,7 +154,7 @@ t_num <- length(t_vec)
 # plotting parameters
 plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 
-# --------------------------- Load & filter data ----------------------------
+# --- Load & filter data -------------------------------------------------------
 CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
 
 OUT_COMBINED <- file.path("supplemental", "combined_pred_prev_exceedance_prob_grouped_year_kalman")
@@ -252,31 +168,8 @@ dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
 shape_Africa <- readRDS("R_ignore/R_scripts/data/shapefiles/sf_admin0_africa.rds")
 shape_water  <- sf::st_read("R_ignore/R_scripts/data/shapefiles/africa_water_bodies.shp", quiet = TRUE)
 
-# --------------------------- Combine K13 data ----------------------------
-k13_any_site_year <- dat %>%
-  # keep only K13 mutations; adjust this filter to your naming convention
-  filter(grepl("^k13", mutation, ignore.case = TRUE)) %>%
-  group_by(year, longitude, latitude, country_name) %>%
-  summarise(
-    numerator = sum(numerator, na.rm = TRUE),
-    denominator = max(denominator, na.rm = TRUE),
-    prevalence = numerator / denominator *100,
-    .groups = "drop"
-  ) %>%
-  transmute(
-    year,
-    longitude = longitude,
-    latitude  = latitude,
-    mutation  = "k13:comb", 
-    numerator = numerator,
-    denominator = denominator,
-    prevalence = prevalence,
-    country_name = country_name
-  )
-
-dat_with_k13 <- dat %>%
-  bind_rows(k13_any_site_year) %>%
-  arrange(year, longitude, latitude, mutation)
+# --- Combine K13 data ---------------------------------------------------------
+dat_with_k13 <- add_combined_k13(dat)
 
 # --- Create white raster for outside Africa -----------------------------------
 CRS_LL     <- sf::st_crs(4326)  # WGS84 lon/lat for plotting
@@ -288,20 +181,20 @@ shape_water_ll  <- shape_water  |> sf::st_transform(CRS_LL)
 # --- Crop Africa polygons -----------------------------------------------------
 
 # Define East Africa box and crop Admin1 shapefile
-bbox_east_africa <- st_bbox(c(
-  xmin = 28,
-  xmax = 48,
-  ymin = -4.6,
-  ymax = 18
-), crs = 4326)
+bbox_east_africa <- get_east_africa_bbox(4326)
 
 xlim <- c(bbox_east_africa["xmin"], bbox_east_africa["xmax"])
 ylim <- c(bbox_east_africa["ymin"], bbox_east_africa["ymax"])
 
-lon_min <- xlim[1] # bbox_east_africa["xmin"]
-lon_max <- xlim[2] # bbox_east_africa["xmax"]
-lat_min <- ylim[1] # bbox_east_africa["ymin"]
-lat_max <- ylim[2] # bbox_east_africa["ymax"]
+lon_min <- xlim[1]
+lon_max <- xlim[2]
+lat_min <- ylim[1]
+lat_max <- ylim[2]
+
+ea_lims <- list(
+  xlim = c(lon_min, lon_max),
+  ylim = c(lat_min, lat_max)
+)
 
 bbox_sfc_ll <- st_as_sfc(bbox_east_africa)
 
@@ -333,8 +226,7 @@ africa_mask <- shape_Africa_crop %>%
   sf::st_union() %>%
   sf::st_make_valid()
 
-
-# --------------------------- Define Mutations ----------------------------
+# --- Define Mutations ---------------------------------------------------------
 all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:446:I", "k13:458:Y", "k13:476:I",   "k13:493:H",   "k13:539:T",
                        "k13:543:T",  "k13:553:L",   "k13:561:H",   "k13:574:L",  "k13:580:Y",
                        "k13:441:L", "k13:449:A",   "k13:469:F",   "k13:481:V",
@@ -343,23 +235,7 @@ all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:4
 # Note for Cecile: the following mutations have a wide grid where prev > 0:
 # 441L, 449A, 469F, 473I, 539T, 553L, 561H, 568G, 574L, 622I
 
-# --- Define color scheme ------------------------------
-pp_cols<- c(
-  "#5E3A9B",  # dark purple (0)
-  "#8cc4e0",  # medium-dark blue
-  "#a8ecbf",  # mint-teal
-  "palegreen3", # <-- ADDED GREEN
-  "khaki2",
-  "#f3c86b",
-  "orange",
-  "hotpink",   # <-- ADDED PINK
-  "red",      
-  "darkred"    
-)
-
-pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 70, 90, 95 , 100))
-
-# --- Loop over each mutation ------------------------------
+# --- Loop over each mutation --------------------------------------------------
 for (mut in all_who_mutations){
   clean_mut <- paste0("k13 ", gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut))
   
@@ -379,7 +255,7 @@ for (mut in all_who_mutations){
     dplyr::filter(prevalence > 0) 
   
   if (dim(pts_pos)[1] != 0){
-    # --------------------------- Create plotting grid ---------------
+    # --- Create plotting grid -------------------------------------------------
     pts_pos <- sf::st_as_sf(pts_pos,
                             coords = c("longitude", "latitude"),
                             crs = CRS_LL,
@@ -387,7 +263,7 @@ for (mut in all_who_mutations){
     xlim <- sort(xlim)
     ylim <- sort(ylim)
     
-    # --------------------------- Project to local Cartesian (km) ---------------
+    # --- Project to local Cartesian (km) --------------------------------------
     # Center projection on study area for good local properties
     lon0 <- median(dat_sub$longitude, na.rm = TRUE)
     lat0 <- median(dat_sub$latitude,  na.rm = TRUE)
@@ -409,8 +285,8 @@ for (mut in all_who_mutations){
     dat_sub$Xkm <- xy_km[, 1]
     dat_sub$Ykm <- xy_km[, 2]
     
-    # --- Build long data for lower / mean / upper ------------------------------
-    cached <- make_or_load(mut, ell_km, tau2)
+    # --- Build long data for lower / mean / upper -----------------------------
+    cached <- make_or_load(mut)
     
     p_post_mean <- cached$p_post_mean
     p_post_median <- cached$p_post_median
@@ -424,7 +300,7 @@ for (mut in all_who_mutations){
     exceed_prob_5 <- exceed_prob[ , , , 2]
     exceed_prob_10 <- exceed_prob[ , , , 3]
     
-    # --- Build long data for lower / mean / upper ------------------------------
+    # --- Build long data for lower / mean / upper -----------------------------
     p_long_median <- make_raster_long(p_post_median, xs, ys, t_vec, plot_times)
     p_long_mean <- make_raster_long(p_post_mean, xs, ys, t_vec, plot_times)
     p_long_CI <- make_raster_long(p_post_CI, xs, ys, t_vec, plot_times)
@@ -433,7 +309,7 @@ for (mut in all_who_mutations){
     exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, t_vec, plot_times)
     exceed_prob_long_1 <- make_raster_long(exceed_prob_1, xs, ys, t_vec, plot_times)
     
-    # --- Mask out sea as white background ------------------------------
+    # --- Mask out sea as white background -------------------------------------
     p_long_median <- mask_to_africa(p_long_median, africa_mask)
     p_long_mean <- mask_to_africa(p_long_mean, africa_mask)
     p_long_CI <- mask_to_africa(p_long_CI, africa_mask)
@@ -442,7 +318,7 @@ for (mut in all_who_mutations){
     exceed_prob_long_5  <- mask_to_africa(exceed_prob_long_5, africa_mask)
     exceed_prob_long_1  <- mask_to_africa(exceed_prob_long_1, africa_mask) 
     
-    # --- Crop dataframes to bbox ------------------------------
+    # --- Crop dataframes to bbox ----------------------------------------------
     p_long_median   <- crop_long_df(p_long_median, xlim, ylim)
     p_long_mean   <- crop_long_df(p_long_mean, xlim, ylim)
     p_long_CI   <- crop_long_df(p_long_CI, xlim, ylim)
@@ -450,19 +326,6 @@ for (mut in all_who_mutations){
     exceed_prob_long_10 <- crop_long_df(exceed_prob_long_10, xlim, ylim)
     exceed_prob_long_5  <- crop_long_df(exceed_prob_long_5,  xlim, ylim)
     exceed_prob_long_1  <- crop_long_df(exceed_prob_long_1,  xlim, ylim)
-    
-    # Rename t to year
-    # p_long_median <- p_long_median %>% rename(year = t)
-    # p_long_mean <- p_long_mean %>% rename(year = t)
-    # exceed_prob_long_1 <- exceed_prob_long_1 %>% rename(year = t)
-    # exceed_prob_long_5 <- exceed_prob_long_5 %>% rename(year = t)
-    # exceed_prob_long_10 <- exceed_prob_long_10 %>% rename(year = t)
-    # 
-    # p_long_median$year       <- factor(p_long_median$year, levels = plot_times)
-    # p_long_mean$year         <- factor(p_long_mean$year, levels = plot_times)
-    # exceed_prob_long_1$year  <- factor(exceed_prob_long_1$year, levels = plot_times)
-    # exceed_prob_long_5$year  <- factor(exceed_prob_long_5$year, levels = plot_times)
-    # exceed_prob_long_10$year <- factor(exceed_prob_long_10$year, levels = plot_times)
     
     # --- Create observed data points ------------------------------
     points_df <- dat_sub %>%
@@ -479,8 +342,19 @@ for (mut in all_who_mutations){
       )
     
     # --- Create and print the three separate plots -----------------------------
-    
     plot_median_no_title_comb  <- plot_layer_combined(p_long_median, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE) +
+      theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
+    
+    plot_median_no_points  <- plot_prev_layer(
+      p_long_df   = p_long_median,
+      title_text  = "",
+      shp         = shape_Africa_crop,
+      shp_water   = shape_water_crop,
+      lims        = ea_lims,
+      x_axis_break = 5,
+      y_axis_break = 5,
+      add_legend  = TRUE
+    ) +
       theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
     
     plot_CI_no_title_comb <- plot_layer_CI_combined(p_long_CI, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE) +
