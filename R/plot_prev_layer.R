@@ -87,7 +87,8 @@ plot_prev_layer <- function(p_long_df,
                             x_axis_break = 5,
                             y_axis_break = 5,
                             points_df = NULL, 
-                            add_legend = FALSE) {
+                            add_legend = FALSE,
+                            viridis = FALSE) {
   
   xmin <- lims[[1]][1]; xmax <- lims[[1]][2]
   ymin <- lims[[2]][1]; ymax <- lims[[2]][2]
@@ -113,15 +114,29 @@ plot_prev_layer <- function(p_long_df,
       default_crs = sf::st_crs(4326),
       clip = "on"
     ) +
-    scale_fill_gradientn(colours = pp_cols,
-                         values  = pp_vals,
-                         limits = c(0, 100),
-                         name = "Prevalence (%)",
-                         breaks = seq(0, 100, by = 10),
-                         na.value = "white") +
     labs(x = "Longitude", y = "Latitude") +
     scale_x_continuous(breaks = x_breaks) +
     scale_y_continuous(breaks = y_breaks)
+  
+  # Define color palette
+  if (viridis) {
+    p <- p + scale_fill_viridis_c(
+      option   = "viridis",
+      limits   = c(0, 100),
+      breaks   = seq(0, 100, by = 10),
+      name     = "Prevalence (%)",
+      na.value = "white"
+    )
+  } else {
+    p <- p + scale_fill_gradientn(
+      colours = prev_colors(),
+      values  = prev_vals(),
+      limits = c(0, 100),
+      name = "Prevalence (%)",
+      breaks = seq(0, 100, by = 10),
+      na.value = "white"
+      )
+  }
   
   # Optional add data points
   if (!is.null(points_df) && nrow(points_df) > 0) {

@@ -239,7 +239,7 @@ for (mut in all_who_mutations){
   
   # --- Create observed data points --------------------------------------------
   points_df <- dat_sub %>%
-    filter(year >= 2012, year <= 2023) %>%     # keep both years in each block
+    filter(year >= min(plot_times), year <= max(plot_times)) %>%     # keep both years in each block
     mutate(
       p_obs = numerator / denominator,
       t     = year

@@ -45,6 +45,10 @@
 #'
 #' @export
 mask_to_africa <- function(df, africa_mask) {
+  old_s2 <- sf::sf_use_s2()
+  sf::sf_use_s2(FALSE)
+  on.exit(sf::sf_use_s2(old_s2), add = TRUE)
+  
   pts <- sf::st_as_sf(df, coords = c("x","y"), crs = 4326, remove = FALSE)
   inside <- lengths(sf::st_intersects(pts, africa_mask)) > 0  # sparse = TRUE by default
   df$p[!inside] <- NA_real_

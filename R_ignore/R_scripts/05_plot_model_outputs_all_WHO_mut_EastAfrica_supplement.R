@@ -67,7 +67,7 @@ plot_exceedance_combined <-function(exceed_prob, title_text, legend_title, shp =
     theme_bw() +
     annotate(
       "rect",
-      xmin = mut_lims[[1]][1], xmax = mut_lims[[1]][2],
+      xmin = lims[[1]][1], xmax = lims[[1]][2],
       ymin = ylim[1], ymax = ylim[2],
       fill = "white", colour = NA
     ) +
@@ -155,7 +155,7 @@ t_num <- length(t_vec)
 plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 
 # --- Load & filter data -------------------------------------------------------
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
 
 OUT_COMBINED <- file.path("supplemental", "combined_pred_prev_exceedance_prob_grouped_year_kalman")
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_COMBINED)), 
@@ -219,12 +219,14 @@ shape_water_planar <- shape_water_ll |>
 shape_Africa_crop <- st_transform(shape_Africa_planar, 4326)
 shape_water_crop  <- st_transform(shape_water_planar,  4326)
 
-# Restore s2
-sf_use_s2(old_s2)
-
 africa_mask <- shape_Africa_crop %>%
+  sf::st_zm(drop = TRUE, what = "ZM") %>%          # drop Z/M if present
+  sf::st_make_valid() %>%
+  sf::st_collection_extract("POLYGON") %>%         # remove geometry collections
   sf::st_union() %>%
   sf::st_make_valid()
+
+sf::sf_use_s2(old_s2)
 
 # --- Define Mutations ---------------------------------------------------------
 all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:446:I", "k13:458:Y", "k13:476:I",   "k13:493:H",   "k13:539:T",
@@ -301,13 +303,15 @@ for (mut in all_who_mutations){
     exceed_prob_10 <- exceed_prob[ , , , 3]
     
     # --- Build long data for lower / mean / upper -----------------------------
-    p_long_median <- make_raster_long(p_post_median, xs, ys, t_vec, plot_times)
-    p_long_mean <- make_raster_long(p_post_mean, xs, ys, t_vec, plot_times)
-    p_long_CI <- make_raster_long(p_post_CI, xs, ys, t_vec, plot_times)
+    plot_idx <- match(plot_times, t_vec)  # indices in 1:t_num
     
-    exceed_prob_long_10 <- make_raster_long(exceed_prob_10, xs, ys, t_vec, plot_times)
-    exceed_prob_long_5 <- make_raster_long(exceed_prob_5, xs, ys, t_vec, plot_times)
-    exceed_prob_long_1 <- make_raster_long(exceed_prob_1, xs, ys, t_vec, plot_times)
+    p_long_median <- make_raster_long(p_post_median[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+    p_long_mean <- make_raster_long(p_post_mean[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+    p_long_CI <- make_raster_long(p_post_CI[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+    
+    exceed_prob_long_10 <- make_raster_long(exceed_prob_10[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+    exceed_prob_long_5 <- make_raster_long(exceed_prob_5[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
+    exceed_prob_long_1 <- make_raster_long(exceed_prob_1[ , , plot_idx, drop = FALSE], xs, ys, plot_times)
     
     # --- Mask out sea as white background -------------------------------------
     p_long_median <- mask_to_africa(p_long_median, africa_mask)
@@ -329,23 +333,22 @@ for (mut in all_who_mutations){
     
     # --- Create observed data points ------------------------------
     points_df <- dat_sub %>%
-      filter(year %in% plot_times) %>%
+      filter(year >= min(plot_times), year <= max(plot_times)) %>%     # keep both years in each block
       mutate(
         p_obs = numerator / denominator,
-        year  = factor(year, levels = plot_times),
-        p     = p_obs * 100
+        t     = year
       ) %>%
-      filter(between(longitude, xlim[1], xlim[2]),
-             between(latitude,  ylim[1], ylim[2])) %>%
+      filter(longitude >= xlim[1], longitude <= xlim[2],
+             latitude  >= ylim[1],  latitude  <= ylim[2]) %>%
       transmute(
-        longitude, latitude, year, p_obs, prevalence, p
+        x = longitude,
+        y = latitude,
+        t = t,
+        p = p_obs * 100   # or prevalence, but keep consistent with your color scale
       )
     
     # --- Create and print the three separate plots -----------------------------
-    plot_median_no_title_comb  <- plot_layer_combined(p_long_median, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE) +
-      theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
-    
-    plot_median_no_points  <- plot_prev_layer(
+    plot_median_no_title  <- plot_prev_layer(
       p_long_df   = p_long_median,
       title_text  = "",
       shp         = shape_Africa_crop,
@@ -353,15 +356,40 @@ for (mut in all_who_mutations){
       lims        = ea_lims,
       x_axis_break = 5,
       y_axis_break = 5,
+      facet_n_row = 2,
+      points_df = points_df,
       add_legend  = TRUE
     ) +
       theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
     
-    plot_CI_no_title_comb <- plot_layer_CI_combined(p_long_CI, "", shape_Africa_crop, shape_water_crop, add_points = TRUE, add_legend = TRUE) +
-      theme(plot.margin = margin(t = -2, r = 2, b = -5, l = 2, unit = "pt"))
+    plot_CI_no_title <- plot_prev_layer(
+      p_long_df   = p_long_CI,
+      title_text  = "",
+      shp         = shape_Africa_crop,
+      shp_water   = shape_water_crop,
+      lims        = ea_lims,
+      x_axis_break = 5,
+      y_axis_break = 5,
+      facet_n_row = 2,
+      points_df = points_df,
+      add_legend  = TRUE,
+      viridis = TRUE
+    ) +
+      theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
     
-    plot_exceed_5_no_title_comb <- plot_exceedance_combined(exceed_prob_long_5, "", legend_title = expression(Pr(Prevalence >= 5*"%"))) +
-      theme(plot.margin = margin(t = -2, r = 2, b = 0,  l = 2, unit = "pt"))
+    plot_exceed_5_no_title <- plot_exceedance(
+      exceed_prob   = exceed_prob_long_5,
+      title_text  = "",
+      legend_title = expression(Pr(Prevalence >= 5*"%")), 
+      shp         = shape_Africa_crop,
+      shp_water   = shape_water_crop,
+      lims        = ea_lims,
+      x_axis_break = 5,
+      y_axis_break = 5,
+      facet_n_row = 2,
+      add_legend  = TRUE
+    ) +
+      theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
     
     prev_pred_exceed_5perc <- 
       ggdraw() +
@@ -375,9 +403,9 @@ for (mut in all_who_mutations){
       ) +
       draw_plot(
         cowplot::plot_grid(
-          plot_median_no_title_comb,
-          plot_CI_no_title_comb, 
-          plot_exceed_5_no_title_comb,
+          plot_median_no_title,
+          plot_CI_no_title, 
+          plot_exceed_5_no_title,
           ncol = 1,
           labels = c("A", "B", "C"),
           label_size = 18,
