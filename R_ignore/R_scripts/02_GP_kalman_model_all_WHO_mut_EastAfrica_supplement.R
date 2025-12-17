@@ -30,31 +30,10 @@ sf_use_s2(FALSE)
 # Clock time
 t0 <- Sys.time()
 
-# --- Helper Function ----------------------------------------------------------
-# Build consistent filenames per (mutation, length_space, length_time, n_features)
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz")) {
-  ext <- match.arg(ext)
-  fn <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
-  file.path(CACHE_DIR, fn)
-}
-
-# NA-robust row mean for 0/1 matrices
-.row_mean01 <- function(X01) {
-  Dk   <- rowSums(!is.na(X01))
-  succ <- rowSums(X01, na.rm = TRUE)
-  ifelse(Dk > 0L, succ / Dk, NA_real_)
-}
-
-# Per-time exceedance from draws: Pk is [M x D] (M = nx*ny)
-exceed_prob_froms <- function(Pk, p_thr) {
-  .row_mean01(Pk > p_thr)  # length M
-}
-
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1         # RW1 variance in feature space
+ell_km <- 70.0527433529838          # RFF length-scale in **kilometres**
+tau2   <- 0.216691553580379         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
@@ -83,39 +62,34 @@ half_m <- (cell_size_km * 1000) / 2
 q_thr <- 0.80   # probability threshold for exceedance probability
 bootstrap    <- 500    # bootstrap resamples
 
-# --------------------------- Load & filter data ----------------------------
+# --- Load & filter data ----------------------------
 
-CACHE_DIR <- "R_ignore/R_scripts/outputs/supplemental/GRFF_kalman_cache_annual_2012_2025"
+CACHE_DIR <- "R_ignore/R_scripts/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(longitude, latitude, year, numerator, denominator, prevalence, mutation)
+  select(longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation)
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
 
-# --------------------------- Fliter admin regions ----------------------------
+# --- Fliter admin regions ---------------------------------------------
 
 target_crs <- 4326
 africa_shp_admin1 <- st_transform(africa_shp_admin1, crs = target_crs)
 
 # Define East Africa box and crop Admin1 shapefile
-bbox_east_africa <- st_bbox(c(
-  xmin = 28,
-  xmax = 48,
-  ymin = -4.6,
-  ymax = 18
-), crs = target_crs)
+bbox_east_africa <- get_east_africa_bbox(target_crs)
 
 xlim <- c(bbox_east_africa["xmin"], bbox_east_africa["xmax"])
 ylim <- c(bbox_east_africa["ymin"], bbox_east_africa["ymax"])
 
-lon_min <- xlim[1] # bbox_east_africa["xmin"]
-lon_max <- xlim[2] # bbox_east_africa["xmax"]
-lat_min <- ylim[1] # bbox_east_africa["ymin"]
-lat_max <- ylim[2] # bbox_east_africa["ymax"]
+lon_min <- xlim[1]
+lon_max <- xlim[2]
+lat_min <- ylim[1]
+lat_max <- ylim[2]
 
 # Grid
 xs <- seq(lon_min, lon_max, length.out = nx)
@@ -125,51 +99,23 @@ M <- nx * ny
 # Using the cropped st_bbox()# Using the cropped Admin 1 data for East Africa
 admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
 
-# --------------------------- Add K13 overall data ----------------------------
-k13_any_site_year <- dat %>%
-  # keep only K13 mutations; adjust this filter to your naming convention
-  filter(grepl("^k13", mutation, ignore.case = TRUE)) %>%
-  group_by(year, longitude, latitude) %>%
-  summarise(
-    numerator = sum(numerator, na.rm = TRUE),
-    denominator = max(denominator, na.rm = TRUE),
-    prevalence = numerator / denominator *100,
-    .groups = "drop"
-  ) %>%
-  transmute(
-    year,
-    longitude = longitude,
-    latitude  = latitude,
-    mutation  = "k13:comb", 
-    numerator = numerator,
-    denominator = denominator,
-    prevalence = prevalence
-  )
+# --- Add K13 overall data ---------------------------------------------
+dat_with_k13 <- add_combined_k13(dat)
 
-dat_with_k13 <- dat %>%
-  bind_rows(k13_any_site_year) %>%
-  arrange(year, longitude, latitude, mutation)
-
-# --------------------------- Define K13 mutants ----------------------------
+# --- Define K13 mutants -----------------------------------------------
 
 args <- commandArgs(trailingOnly = TRUE)
 mut <- args[[1]]
 
-# which mutation we are focusing on
-all_who_mutations <- c("k13:comb", 
-                       "k13:675:V", 
-                       "k13:622:I", 
-                       "k13:561:H", 
-                       "k13:441:L")
-
+# Per-mutation clock start
 mut_t0 <- Sys.time()
 
-# --------------------------- Run spatiotemporal ----------------------------
+# --- Run spatiotemporal ----------------------------
 dat_sub <- dat_with_k13 |>
   filter(mutation == mut) |>
   filter(is.finite(numerator), is.finite(denominator), denominator > 0)
 
-# --------------------------- Project to local Cartesian (km) ---------------
+# --- Project to local Cartesian (km) ---------------
 # Center projection on study area for good local properties
 lon0 <- median(dat_sub$longitude, na.rm = TRUE)
 lat0 <- median(dat_sub$latitude,  na.rm = TRUE)
@@ -198,7 +144,10 @@ xy_km <- xy_m / 1000
 dat_sub$Xkm <- xy_km[, 1]
 dat_sub$Ykm <- xy_km[, 2]
 
-# --------------------------- Random Fourier Features -----------------------
+# ==============================================================================
+# Spatiotemporal model
+# ==============================================================================
+# --- Random Fourier Features -----------------------
 # Draw D frequencies ω_j ~ N(0, ℓ⁻² I₂), ℓ in **km**
 Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km), ncol = 2)  # [D x 2]
 
@@ -208,7 +157,7 @@ phi_of_coords <- function(S_km) {
   cbind(cos(OS), sin(OS)) * (1 / sqrt(D))            # (n x 2D)
 }
 
-# --------------------------- Create grid for prediction -----------------------
+# --- Create grid for prediction -----------------------
 # Φ on projected grid (km)
 OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
 Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
@@ -223,7 +172,7 @@ p_post_median <- array(NA, dim = c(nx, ny, length(t_vec)))
 # p_post_lo   <- array(NA, dim = c(nx, ny, length(plot_times)))
 # p_post_hi   <- array(NA, dim = c(nx, ny, length(plot_times)))
 
-# --------------------------- Organize by time ------------------------------
+# --- Organize by time ------------------------------
 # For each time index, collect projected coords and Binomial stats
 
 obs_by_t <- vector("list", t_num)
@@ -240,14 +189,14 @@ for (ti in 1:t_num) {
   }
 }
 
-# --------------------------- State-space model -----------------------------
+# --- State-space model -----------------------------
 # Random walk in feature space: w_t = w_{t-1} + ξ_t,  ξ_t ~ N(0, τ² I)
 Qw   <- Diagonal(2 * D, tau2)
 m_w  <- matrix(0, 2 * D, t_num)          # smoothed means (initially 0)
 m0_w <- rep(0, 2 * D)                    # prior mean
 C0_w <- Matrix(0, 2 * D, 2 * D, sparse = FALSE)  # prior covariance (zero variance, i.e. initial frequency known exactly)
 
-# --------------------------- EM loop ---------------------------------------
+# --- EM loop ---------------------------------------
 m_pred <- vector("list", t_num)
 C_pred <- vector("list", t_num)
 m_filt <- matrix(NA, 2 * D, t_num)
@@ -430,9 +379,9 @@ p_draws    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
 for (b in 1:num_post_draws) {
   message(sprintf("Posterior draw %s of %s", b, num_post_draws))
   
-  # --------------------------------------------
+  # --------------------
   # 1. Backward sampling in feature space (β_t)
-  # --------------------------------------------
+  # --------------------
   beta_b <- matrix(NA_real_, nrow = 2 * D, ncol = t_num)
   
   # Sample final time T from N(m_filt[,T], C_filt[[T]])
@@ -469,9 +418,9 @@ for (b in 1:num_post_draws) {
   # Store β path
   beta_draws[, , b] <- beta_b
   
-  # --------------------------------------------
+  # --------------------
   # 2. Map β_t path to full surfaces z(s,t), p(s,t)
-  # --------------------------------------------
+  # --------------------
   for (ti in 1:t_num) {
     z_vec <- as.numeric(z_init + Phi_full %*% beta_b[, ti])   # length M = nx*ny
     z_mat <- matrix(z_vec, nrow = nx, ncol = ny, byrow = FALSE)
@@ -539,9 +488,7 @@ model_output <- list(
 # Use your cache_path function to create a filename
 output_filename <- cache_path(
   mut = mut, 
-  lenS = ell_km, 
-  lenT = tau2, 
-  what = "full_model_output", 
+  what = "optimized_ell_tau2_full_model_output", 
   ext = "rds"
 )
 

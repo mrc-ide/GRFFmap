@@ -32,17 +32,6 @@ sf_use_s2(FALSE)
 # Clock time
 t0 <- Sys.time()
 
-# --- Helper Function ----------------------------------------------------------
-# Build consistent filenames per (mutation, length_space, length_time, n_features)
-cache_path <- function(mut, what, ext = c("rds", "parquet", "rds.gz")) {
-  ext <- match.arg(ext)
-  fn  <- sprintf("%s_%s.%s",
-                 gsub("[:/ ]", "_", mut),
-                 what,
-                 ext)
-  file.path(CACHE_DIR, fn)
-}
-
 # --- Settings -----------------------------------------------------------------
 # model parameters
 # ell_km <- 120          # RFF length-scale in **kilometres**
@@ -79,9 +68,9 @@ CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(longitude, latitude, year, numerator, denominator, prevalence, mutation) 
+  select(longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
@@ -91,45 +80,17 @@ target_crs <- 4326
 africa_shp_admin1 <- st_transform(africa_shp_admin1, crs = target_crs)
 
 # Define East Africa box and crop Admin1 shapefile
-bbox_east_africa <- st_bbox(c(
-  xmin = 28.48,
-  xmax = 48.43,
-  ymin = -4.6,
-  ymax = 15.29
-), crs = target_crs)
+bbox_east_africa <- get_east_africa_bbox(target_crs)
 
 # Using the cropped Admin 1 data for East Africa
 admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
 
 # --- Add K13 overall data -----------------------------------------------------
-k13_any_site_year <- dat %>%
-  # keep only K13 mutations; adjust this filter to your naming convention
-  filter(grepl("^k13", mutation, ignore.case = TRUE)) %>%
-  group_by(year, longitude, latitude) %>%
-  summarise(
-    numerator = sum(numerator, na.rm = TRUE),
-    denominator = max(denominator, na.rm = TRUE),
-    prevalence = numerator / denominator *100,
-    .groups = "drop"
-  ) %>%
-  transmute(
-    year,
-    longitude = longitude,
-    latitude  = latitude,
-    mutation  = "k13:comb", 
-    numerator = numerator,
-    denominator = denominator,
-    prevalence = prevalence
-  )
-
-dat_with_k13 <- dat %>%
-  bind_rows(k13_any_site_year) %>%
-  arrange(year, longitude, latitude, mutation)
+dat_with_k13 <- add_combined_k13(dat)
 
 # --- Define K13 mutants -------------------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
-# mut <- args[[1]]
-mut <- "k13:675:V"
+mut <- args[[1]]
 
 # Per-mutation clock start
 mut_t0 <- Sys.time()
@@ -208,7 +169,7 @@ vg_1y_sp$np    <- as.numeric(vg_1y_sp$np)
 # Assign gstat variogram class so gstat plotting/fitting methods work
 class(vg_1y_sp) <- c("gstatVariogram", "data.frame")
 # Quick diagnostic plot of the empirical spatial variogram at ~1-year lag
-plot(vg_1y_sp)
+# plot(vg_1y_sp)
 
 # Fit a parametric variogram model to estimate the spatial range parameter
 # Reasonable starting values
@@ -244,14 +205,25 @@ plot(
 )
 
 # Create a smooth model-implied variogram curve across the observed distances
+# Create a smooth model-implied variogram curve across the observed distances
 vg_line <- variogramLine(
   vgm_fit,
   maxdist = max(vg_1y_sp$dist),
   n = 200
 )
 
-# Overlay fitted variogram curve
+pdf(paste0(CACHE_DIR, "/", mut, "variogram_1year_spatial.pdf"), width = 6, height = 5)
+plot(
+  gamma ~ dist,
+  data = vg_1y_sp,
+  xlab = "Distance (km)",
+  ylab = "Semivariance",
+  main = "Empirical variogram (≈1-year pairs) with fitted Gaussian model",
+  pch = 1
+)
+# Fitted variogram curve
 lines(vg_line$dist, vg_line$gamma, lwd = 2, col = "black")
+dev.off()
 
 # --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
 
@@ -274,7 +246,7 @@ vg_st_time <- variogramST(
 )
 
 # Sanity check: should be a single spatial bin (~25 km midpoint)
-unique(vg_st_time$dist)
+# unique(vg_st_time$dist)
 
 # Extract temporal variogram (collapse spatial dimension)
 vg_t <- vg_st_time[, c("timelag", "gamma", "np")]
@@ -292,13 +264,13 @@ vg_t$np    <- as.numeric(vg_t$np)
 class(vg_t) <- c("gstatVariogram", "data.frame")
 
 # Visual inspection of temporal variogram
-plot(gamma ~ dist, data = vg_t,
-     xlab = "Time lag (days)", ylab = "Semivariance",
-     main = "Temporal variogram (pairs ≤ 25 km)")
+# plot(gamma ~ dist, data = vg_t,
+#      xlab = "Time lag (days)", ylab = "Semivariance",
+#      main = "Temporal variogram (pairs ≤ 25 km)")
 
 # Estimate RW variance via weighted linear regression (model: gamma(h) = 0.5 * tau^2 * h)
 lm_rw0 <- lm(gamma ~ 0 + dist, data = vg_t, weights = np)
-summary(lm_rw0)
+# summary(lm_rw0)
 
 # Estimated slope
 b_hat <- coef(lm_rw0)[["dist"]]   # slope
@@ -308,10 +280,17 @@ tau2_hat_day <- 2 * b_hat
 tau2_hat <- tau2_hat_day * 365
 
 # Final plot with fitted line
-plot(gamma ~ dist, data = vg_t,
-     xlab = "Time lag (days)", ylab = "Semivariance",
-     main = "Temporal variogram with line anchored at 0")
+pdf(paste0(CACHE_DIR, "/", mut, "temporal_variogram_rw_fit.pdf"), width = 6, height = 5)
+plot(
+  gamma ~ dist,
+  data = vg_t,
+  xlab = "Time lag (days)",
+  ylab = "Semivariance",
+  main = "Temporal variogram with RW fit (intercept fixed at 0)"
+)
+# Fitted RW line: gamma(h) = b_hat * h
 abline(a = 0, b = b_hat, lwd = 2)
+dev.off()
 
 # ==============================================================================
 # Spatiotemporal model
