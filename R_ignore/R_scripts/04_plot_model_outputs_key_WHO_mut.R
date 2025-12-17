@@ -84,7 +84,7 @@ pp_cols<- c(
 pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 70, 90, 95 , 100))
 
 # --- Loop over each mutation ------------------------------
-mut <- "k13:675:V"
+mut <- "k13:comb"
 for (mut in all_who_mutations){
   message("Processing ", mut)
   clean_mut <- paste0("k13 ", gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut))

@@ -47,7 +47,7 @@ add_combined_k13 <- function(
   
   k13_any_site_year <- dat %>%
     dplyr::filter(grepl(mutation_regex, mutation, ignore.case = TRUE)) %>%
-    dplyr::group_by(year, longitude, latitude, country_name) %>%
+    dplyr::group_by(study_id, survey_id, year, longitude, latitude, country_name) %>%
     dplyr::summarise(
       numerator   = sum(numerator, na.rm = TRUE),
       denominator = max(denominator, na.rm = TRUE),
@@ -56,6 +56,8 @@ add_combined_k13 <- function(
     ) %>%
     dplyr::transmute(
       year,
+      study_id,
+      survey_id,
       longitude,
       latitude,
       mutation    = combined_label,
