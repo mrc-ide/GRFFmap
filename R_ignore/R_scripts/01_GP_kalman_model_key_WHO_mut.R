@@ -70,7 +70,7 @@ dir_create(CACHE_DIR)
 # Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
+  select(study_id, survey_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
