@@ -70,11 +70,7 @@ dir_create(CACHE_DIR)
 # Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-<<<<<<< HEAD
-  select(study_id, survey_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
-=======
   select(survey_id, study_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
->>>>>>> 05c963b (fixed spatioal variogram analysis with weighted least squares model)
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
