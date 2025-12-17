@@ -42,7 +42,7 @@ dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_MEAN_DIR),
              paste0("R_ignore/R_scripts/outputs/plots/", OUT_EXCEED_DIR)),
            recurse = TRUE)
 
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
   select(longitude, latitude, year, numerator, denominator, prevalence, mutation, country_name)
 
