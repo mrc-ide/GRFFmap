@@ -70,7 +70,11 @@ dir_create(CACHE_DIR)
 # Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
+<<<<<<< HEAD
   select(study_id, survey_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
+=======
+  select(survey_id, study_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
+>>>>>>> 05c963b (fixed spatioal variogram analysis with weighted least squares model)
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
@@ -147,12 +151,15 @@ st_obj <- spacetime::STIDF(sp_pts, time_idx, data = data.frame(z = dat_sub$z))
 eps_days <- 0.5
 
 # Compute spatiotemporal variogram
+coords <- as.matrix(dat_sub[, c("Xkm","Ykm")])
+dmax <- max(sp::spDists(coords, longlat = FALSE), na.rm = TRUE)
+
 vg_st_1year <- variogramST(
   z ~ 1,
   data   = st_obj,
   tlags  = c(365 - eps_days, 365 + eps_days, 3 * 365),  # boundaries for ≤2 years
   tunit  = "days",
-  cutoff = 1500,
+  cutoff = dmax,
   width  = 25
 )
 
@@ -167,62 +174,52 @@ vg_1y_sp$gamma <- as.numeric(vg_1y_sp$gamma)
 vg_1y_sp$np    <- as.numeric(vg_1y_sp$np)
 
 # Assign gstat variogram class so gstat plotting/fitting methods work
-class(vg_1y_sp) <- c("gstatVariogram", "data.frame")
-# Quick diagnostic plot of the empirical spatial variogram at ~1-year lag
-# plot(vg_1y_sp)
+vg_1y_sp <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & is.finite(np) & np > 0)
+class(vg_1y_sp) <- c("gstatVariogram","data.frame")
 
-# Fit a parametric variogram model to estimate the spatial range parameter
-# Reasonable starting values
-nugget0 <- min(vg_1y_sp$gamma)
-psill0  <- max(vg_1y_sp$gamma) - nugget0
-range0  <- 500
+df <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & dist > 0)
+h  <- df$dist
+g  <- df$gamma
 
-# Initialize a Gaussian variogram model
-vgm_init <- vgm(
-  psill  = psill0,
-  model  = "Gau",
-  range  = range0,
-  nugget = nugget0
+gamma_gauss <- function(h, psill, range, nugget) {
+  nugget + psill * (1 - exp(-(h / range)^2))
+}
+
+obj <- function(par_log) {
+  psill <- exp(par_log[1])
+  range <- exp(par_log[2])
+  nugget <- exp(par_log[3])
+  pred  <- gamma_gauss(h, psill, range, nugget)
+  sum((g - pred)^2)
+}
+
+# reasonable starts
+nugget0 <- max(1e-8, min(g, na.rm = TRUE))  
+psill0 <- median(g, na.rm = TRUE)
+range0 <- median(h, na.rm = TRUE)
+
+fit <- optim(
+  par    = log(c(psill0, range0, nugget0)),
+  fn     = obj,
+  method = "Nelder-Mead"
 )
 
-# Fit the model to the empirical variogram points
-vgm_fit <- fit.variogram(vg_1y_sp, vgm_init)
+psill_hat  <- exp(fit$par[1])
+range_hat  <- exp(fit$par[2])
+nugget_hat <- exp(fit$par[3])
 
-# Extract fitted Gaussian range parameter (gstat’s "range" for model "Gau")
-a_hat  <- vgm_fit$range[vgm_fit$model == "Gau"]
+ell_km_hat <- range_hat / sqrt(2)  # your conversion
+psill_hat; range_hat; ell_km_hat
 
-# Convert gstat Gaussian range parameter to an RFF-style length-scale ell
-ell_km_hat <- a_hat / sqrt(2)
+hgrid <- seq(0, max(h), length.out = 500)
+pred  <- gamma_gauss(hgrid, psill_hat, range_hat, nugget_hat)
 
-# Plot empirical variogram points with fitted model curve overlay
-plot(
-  gamma ~ dist,
-  data = vg_1y_sp,
-  xlab = "Distance (km)",
-  ylab = "Semivariance",
-  main = "Empirical variogram (≈1-year pairs) with exponential fit",
-  pch = 1
-)
-
-# Create a smooth model-implied variogram curve across the observed distances
-# Create a smooth model-implied variogram curve across the observed distances
-vg_line <- variogramLine(
-  vgm_fit,
-  maxdist = max(vg_1y_sp$dist),
-  n = 200
-)
+plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
+lines(hgrid, pred, lwd=2)
 
 pdf(paste0(CACHE_DIR, "/", mut, "variogram_1year_spatial.pdf"), width = 6, height = 5)
-plot(
-  gamma ~ dist,
-  data = vg_1y_sp,
-  xlab = "Distance (km)",
-  ylab = "Semivariance",
-  main = "Empirical variogram (≈1-year pairs) with fitted Gaussian model",
-  pch = 1
-)
-# Fitted variogram curve
-lines(vg_line$dist, vg_line$gamma, lwd = 2, col = "black")
+plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
+lines(hgrid, pred, lwd=2)
 dev.off()
 
 # --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
@@ -297,6 +294,8 @@ dev.off()
 # ==============================================================================
 tau2 <- tau2_hat
 ell_km <- ell_km_hat
+
+message("Optimal parameters are. tau2 = ", tau2, "and ell_km = ", ell_km)
 
 # --- Random Fourier Features --------------------------------------------------
 # Draw D frequencies ω_j ~ N(0, ℓ⁻² I₂), ℓ in **km**
