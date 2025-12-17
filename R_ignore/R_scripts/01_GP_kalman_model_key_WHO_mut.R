@@ -176,17 +176,18 @@ class(vg_1y_sp) <- c("gstatVariogram","data.frame")
 df <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & dist > 0)
 h  <- df$dist
 g  <- df$gamma
+w <- sqrt(df$np)
 
 gamma_gauss <- function(h, psill, range, nugget) {
   nugget + psill * (1 - exp(-(h / range)^2))
 }
 
-obj <- function(par_log) {
-  psill <- exp(par_log[1])
-  range <- exp(par_log[2])
+obj_wls <- function(par_log) {
+  psill  <- exp(par_log[1])
+  range  <- exp(par_log[2])
   nugget <- exp(par_log[3])
-  pred  <- gamma_gauss(h, psill, range, nugget)
-  sum((g - pred)^2)
+  pred   <- gamma_gauss(h, psill, range, nugget)
+  sum(w * (g - pred)^2)
 }
 
 # reasonable starts
@@ -194,11 +195,7 @@ nugget0 <- max(1e-8, min(g, na.rm = TRUE))
 psill0 <- median(g, na.rm = TRUE)
 range0 <- median(h, na.rm = TRUE)
 
-fit <- optim(
-  par    = log(c(psill0, range0, nugget0)),
-  fn     = obj,
-  method = "Nelder-Mead"
-)
+fit <- optim(log(c(psill0, range0, nugget0)), obj_wls, method="Nelder-Mead")
 
 psill_hat  <- exp(fit$par[1])
 range_hat  <- exp(fit$par[2])
