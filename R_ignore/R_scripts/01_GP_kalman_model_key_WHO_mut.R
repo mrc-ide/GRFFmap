@@ -178,37 +178,37 @@ h  <- df$dist
 g  <- df$gamma
 w <- sqrt(df$np)
 
-gamma_gauss <- function(h, psill, range, nugget) {
-  nugget + psill * (1 - exp(-(h / range)^2))
+nugget_fix <- 0.2
+
+gamma_gauss_fixnug <- function(h, psill, range) {
+  nugget_fix + psill * (1 - exp(-(h / range)^2))
 }
 
-obj_wls <- function(par_log) {
-  psill  <- exp(par_log[1])
-  range  <- exp(par_log[2])
-  nugget <- exp(par_log[3])
-  pred   <- gamma_gauss(h, psill, range, nugget)
+obj_wls_fixnug <- function(par_log) {
+  psill <- exp(par_log[1])
+  range <- exp(par_log[2])
+  pred  <- gamma_gauss_fixnug(h, psill, range)
   sum(w * (g - pred)^2)
 }
 
-# reasonable starts
-nugget0 <- max(1e-8, min(g, na.rm = TRUE))  
-psill0 <- median(g, na.rm = TRUE)
+# starts (partial sill should exclude nugget)
+psill0 <- max(1e-8, median(g, na.rm = TRUE) - nugget_fix)
 range0 <- median(h, na.rm = TRUE)
 
-fit <- optim(log(c(psill0, range0, nugget0)), obj_wls, method="Nelder-Mead")
+fit <- optim(
+  par    = log(c(psill0, range0)),
+  fn     = obj_wls_fixnug,
+  method = "Nelder-Mead"
+)
 
 psill_hat  <- exp(fit$par[1])
 range_hat  <- exp(fit$par[2])
-nugget_hat <- exp(fit$par[3])
+nugget_hat <- nugget_fix
 
-ell_km_hat <- range_hat / sqrt(2)  # your conversion
-psill_hat; range_hat; ell_km_hat
+ell_km_hat <- range_hat / sqrt(2)
 
 hgrid <- seq(0, max(h), length.out = 500)
-pred  <- gamma_gauss(hgrid, psill_hat, range_hat, nugget_hat)
-
-plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
-lines(hgrid, pred, lwd=2)
+pred  <- nugget_fix + psill_hat * (1 - exp(-(hgrid / range_hat)^2))
 
 pdf(paste0(CACHE_DIR, "/", mut, "variogram_1year_spatial.pdf"), width = 6, height = 5)
 plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
