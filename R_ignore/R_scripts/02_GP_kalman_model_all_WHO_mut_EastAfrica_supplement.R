@@ -32,8 +32,8 @@ t0 <- Sys.time()
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 70.0527433529838          # RFF length-scale in **kilometres**
-tau2   <- 0.216691553580379         # RW1 variance in feature space
+ell_km <- 166.883369930852          # RFF length-scale in **kilometres**
+tau2   <- 0.280083398594692         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
@@ -54,7 +54,7 @@ t_num <- length(t_vec)
 plot_times <- seq(2012, 2025, by = 1) # should be within t_vec
 
 # posterior draws
-num_post_draws <- 500 
+num_post_draws <- 1000 
 
 # parameters for exceedance plot
 cell_size_km <- 5
@@ -64,13 +64,13 @@ bootstrap    <- 500    # bootstrap resamples
 
 # --- Load & filter data ----------------------------
 
-CACHE_DIR <- "R_ignore/R_scripts/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation)
+  select(survey_id, study_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation)
 
 # Read Africa shape files
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
