@@ -16,13 +16,14 @@ sf_use_s2(FALSE)
 set.seed(1)
 
 # --- Define country based palette ----------------------------------------------------------
-
-# base color palette for countries (will be repeated/trimmed as needed)
-country_base_cols <- c(
-  "#88CCEE","#DDCC77",
-  "#CC6677","#882255","#AA4499","#DDDDDD","#000000",
-  "#E69F00","#56B4E9","#009E73","#F0E442","#0072B2",
-  "#D55E00","#CC79A7","#9A6324","#800000"
+country_colors <- c(
+  "Uganda"    = "#0072B2",  # deep blue
+  "Rwanda"    = "#D55E00",  # orange
+  "Ethiopia"  = "#009E73",  # green
+  "Eritrea"   = "#CC79A7",  # pink / magenta
+  "Sudan"     = "#E69F00",  # golden yellow
+  "Tanzania"  = "#882255",  # dark maroon
+  "Democratic Republic of the Congo" = "#7F7F7F"  # neutral grey
 )
 
 # --- Define cache and output directory ----------------------------------------
@@ -34,7 +35,7 @@ dir_create(c(
 ))
 
 # --- Load data ----------------------------------------------------------------
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day))
 
 # --- Filter data --------------------------------------------------------------
@@ -58,11 +59,11 @@ admin1_regions <- africa_shp_admin1 |>
   st_crop(bbox_east_africa)
 
 # --- K13 Mutations of interests -----------------------------------------------
-all_who_mutations <- c("k13:622:I", "k13:675:V", "k13:561:H")
+key_mutations <- c("k13:622:I", "k13:675:V", "k13:561:H")
 fig5_plots <- list()
 
 # --- Main loop over mutations -------------------------------------------------
-for (mut in all_who_mutations){
+for (mut in key_mutations){
   print(paste0("Processing ", mut, "........."))
   clean_mut <- gsub("^k13:(\\d+):([A-Za-z])$", "k13 \\1\\2", mut)
   
@@ -83,7 +84,7 @@ for (mut in all_who_mutations){
   ys <- cached$ys
   df_posterior_timeseries <- cached$time_series
   p_median <- cached$p_post_median
-    
+  
   # --- Summarise posterior by (t, id_1) into median + 95% CI ------------------
   admin1_time_series_final <- df_posterior_timeseries %>%
     group_by(t, id_1) %>%
@@ -96,57 +97,8 @@ for (mut in all_who_mutations){
     left_join(admin1_regions %>% st_drop_geometry() %>% distinct(id_1, name_0, name_1),
               by = "id_1") %>%
     filter(t >= min(plot_times), t <= max(plot_times)+1)
-
-  # --- Summarise posterior by (t, id_1) into median + 95% CI ------------------
-  annual_prev_plot_country <- ggplot(
-    admin1_time_series_final,
-    aes(
-      x     = t,
-      y     = mean_prevalence*100,
-      group = id_1,
-      color = name_0,
-      fill  = name_0
-    )
-  ) +
-    geom_ribbon(
-      aes(ymin = lower_ci_bound*100, ymax = upper_ci_bound),
-      alpha    = 0.10,
-      linetype = "blank"
-    ) +
-    geom_line(linewidth = 0.7, alpha = 1) +
-    facet_wrap(~ name_0) +
-    geom_text_repel(
-      data = admin1_time_series_final |>
-        group_by(name_0, name_1) |>
-        slice_max(order_by = t, n = 1) |>
-        ungroup(),
-      aes(label = name_1),
-      color         = "black",
-      hjust         = 1,
-      nudge_x       = 0.5,
-      size          = 2.5,
-      show.legend   = FALSE,
-      segment.color = "grey60",
-      max.overlaps  = 10
-    ) +
-    labs(
-      x        = "Year",
-      y        = "Mean Prevalence",
-      title    = paste("Annual Prevalence Trends by Country for", clean_mut),
-      subtitle = "Each line represents an Admin 1 region"
-    ) +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      legend.position = "none"
-    )
   
-  # save_figs(
-  #   file.path(OUT_PLOT_DIR, paste0(mut, "_country_prev_draws")),
-  #   annual_prev_plot_country,
-  #   width = 10
-  # )
-  
-  # --- Plot 2: Plot only countries where prevalence ever exceeds cutoff ------------
+  # --- Plot only countries where prevalence ever exceeds cutoff ------------
   # which countries ever exceed prev_cutoff at region level
   select_countries <- admin1_time_series_final |>
     filter(mean_prevalence > prev_cutoff) |>
@@ -156,14 +108,28 @@ for (mut in all_who_mutations){
     semi_join(select_countries, by = "name_0") |>
     filter(
       !(name_1 == "Lake Kivu"      & mut %in% c("k13:561:H", "k13:675:V")),
-      !(name_1 == "Lake Victoria"  & mut %in% c("k13:561:H", "k13:675:V"))
+      !(name_1 == "Lake Victoria"  & mut %in% c("k13:561:H", "k13:675:V")),
+      !(name_1 == "Sud-Kivu"  & mut %in% c("k13:561:H", "k13:675:V")),
+      !(name_1 == "Nord-Kivu"  & mut %in% c("k13:561:H", "k13:675:V"))
     )
   
-  countries <- sort(unique(adm1_timeseries_bycountry_data$name_0))
+  if (mut == "k13:561:H") {
+    desired <- c("Tanzania", "Rwanda", "Uganda")
+    
+    adm1_timeseries_bycountry_data <- adm1_timeseries_bycountry_data |>
+      mutate(
+        name_0 = factor(
+          name_0,
+          levels = c(desired, setdiff(sort(unique(name_0)), desired))
+        )
+      )
+  } else {
+    adm1_timeseries_bycountry_data <- adm1_timeseries_bycountry_data |>
+      mutate(name_0 = factor(name_0, levels = sort(unique(name_0))))
+  }
   
-  # repeat/trim base palette to match number of countries
-  my_colors <- rep_len(country_base_cols, length(countries))
-  names(my_colors) <- countries
+  countries <- levels(adm1_timeseries_bycountry_data$name_0)
+  my_colors <- country_colors[countries]
   
   annual_prev_larger_plot_country <- adm1_timeseries_bycountry_data |>
     ggplot(
@@ -189,13 +155,14 @@ for (mut in all_who_mutations){
       aes(label = name_1),
       color         = "black",
       hjust         = 0,
-      nudge_x       = 0.5,
+      nudge_x       = 1.5,
       size          = 2.5,
       show.legend   = FALSE,
       segment.color = "grey60",
       max.overlaps  = 10
     ) +
     facet_wrap(~ name_0) +
+    coord_cartesian(ylim = c(0, 1)) +
     scale_color_manual(values = my_colors) +
     scale_fill_manual(values  = my_colors,
                       name = "Country") +
@@ -212,16 +179,18 @@ for (mut in all_who_mutations){
       title = clean_mut
     ) +
     theme_bw() + 
-    theme(legend.position = "None")
-  
+    theme(legend.position = "None",
+          panel.grid.major = element_line(color = "grey85", linewidth = 0.3),
+          panel.grid.minor = element_blank()
+  )
   annual_prev_larger_plot_country <- plot_theme(annual_prev_larger_plot_country)
   
   
   save_figs(
     file.path(OUT_PLOT_DIR, paste0(mut, "_country_prev_larger_", prev_cutoff, "_draws")),
     annual_prev_larger_plot_country,
-    width  = 8,
-    height = 3
+    width  = 9,
+    height = 3.5
   )
   
   fig5_plots[[mut]] <- annual_prev_larger_plot_country

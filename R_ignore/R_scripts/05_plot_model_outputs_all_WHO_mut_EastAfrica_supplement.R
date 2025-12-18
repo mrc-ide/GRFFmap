@@ -18,132 +18,6 @@ load_all()
 
 set.seed(1)
 
-plot_layer_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = TRUE) {
-  p <- ggplot() +
-    geom_raster(aes(x = x, y = y, fill = p*100), data = p_long_df) +
-    geom_sf(data = shp, linewidth = 0.2, fill = NA, color = "white") +
-    geom_sf(data = shp_water, fill = "white", colour = NA) +
-    coord_sf(
-      xlim = unname(as.numeric(xlim)),
-      ylim = unname(as.numeric(ylim)),
-      expand = FALSE,
-      crs = sf::st_crs(4326),          # reproject sf layers to WGS84
-      default_crs = sf::st_crs(4326),  # interpret x/y (raster/points) as WGS84
-      clip = "on"
-    )
-  p <- plot_theme(p)
-  if (add_points) {
-    p <- p + geom_point(
-      aes(x = longitude, y = latitude, fill = p), 
-      data  = points_df %>% arrange(p),
-      shape = 21, colour = "darkgrey", size = 1.5, stroke = 0.2,
-      inherit.aes = FALSE
-    )
-  }
-  if (!add_legend){
-    p <- p + theme(legend.position = "none")
-  }
-  else{
-    p <- p + theme(legend.position = "bottom",
-                   legend.key.width = unit(2, "cm"),
-                   legend.key.height = unit(0.2, "cm"))
-  }
-  if (title_text != ""){
-    p <- p + labs(title = title_text)
-  }
-  p <- p + scale_fill_gradientn(colours = prev_colors(),
-                                values  = prev_vals(),
-                                limits = c(0, 100), 
-                                name = "Prevalence (%)",
-                                breaks = seq(0, 100, by = 10),
-                                na.value = "white") +
-    facet_wrap(~ t, nrow = 2) +
-    labs(x = "Longitude", y = "Latitude")
-  p
-}
-
-plot_exceedance_combined <-function(exceed_prob, title_text, legend_title, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = FALSE) {
-  p <- ggplot() +
-    theme_bw() +
-    annotate(
-      "rect",
-      xmin = lims[[1]][1], xmax = lims[[1]][2],
-      ymin = ylim[1], ymax = ylim[2],
-      fill = "white", colour = NA
-    ) +
-    geom_raster(aes(x = x, y = y, fill = p*100), data = exceed_prob) +
-    geom_sf(data = shape_Africa, linewidth = 0.2, fill = NA, color = "white") +
-    geom_sf(data = shp_water, fill = "white", colour = NA) +
-    coord_sf(xlim = xlim, ylim = ylim, expand = FALSE, crs = st_crs(4326)) +
-    scale_fill_viridis_c(
-      option = "mako",
-      direction = 1,
-      limits = c(0, 100),
-      breaks = seq(0, 100, by = 10),
-      name = legend_title,
-      na.value = "white"
-    ) +
-    facet_wrap(~t, nrow = 2) +
-    labs(
-      x = "Longitude",
-      y = "Latitude"
-    ) 
-  p <- plot_theme(p)
-  p <- p + theme(legend.position = "bottom",
-                 legend.key.width = unit(2, "cm"),
-                 legend.key.height = unit(0.2, "cm")
-  )
-  if (title_text != ""){
-    p <- p + labs(title = title_text)
-  }
-  p
-}
-
-plot_layer_CI_combined <- function(p_long_df, title_text, shp = shape_Africa, shp_water = shape_water, add_points = FALSE, add_legend = TRUE) {
-  p <- ggplot() +
-    geom_raster(aes(x = x, y = y, fill = p*100), data = p_long_df) +
-    geom_sf(data = shp, linewidth = 0.2, fill = NA, color = "white") +
-    geom_sf(data = shp_water, fill = "white", colour = NA) +
-    coord_sf(
-      xlim = unname(as.numeric(xlim)),
-      ylim = unname(as.numeric(ylim)),
-      expand = FALSE,
-      crs = sf::st_crs(4326),          # reproject sf layers to WGS84
-      default_crs = sf::st_crs(4326),  # interpret x/y (raster/points) as WGS84
-      clip = "on"
-    )
-  p <- plot_theme(p)
-  if (add_points) {
-    p <- p + geom_point(
-      aes(x = longitude, y = latitude, fill = p),  # p is already % units
-      data  = points_df %>% arrange(p),
-      shape = 21, colour = "darkgrey", size = 1.5, stroke = 0.2,
-      inherit.aes = FALSE
-    )
-  }
-  if (!add_legend){
-    p <- p + theme(legend.position = "none")
-  }
-  else{
-    p <- p + theme(legend.position = "bottom",
-                   legend.key.width = unit(2, "cm"),
-                   legend.key.height = unit(0.2, "cm"))
-  }
-  if (title_text != ""){
-    p <- p + labs(title = title_text)
-  }
-  p <- p + scale_fill_viridis_c(
-    option = "magma",
-    limits = c(0, 100),
-    breaks = seq(0, 100, by = 10),
-    name = "Prevalence (%)",
-    na.value = "white"
-  ) +
-    facet_wrap(~ t, nrow = 2) +
-    labs(x = "Longitude", y = "Latitude")
-  p
-}
-
 # --- Settings -----------------------------------------------------------------
 # prediction parameters
 nx <- 200
@@ -161,9 +35,9 @@ OUT_COMBINED <- file.path("supplemental", "combined_pred_prev_exceedance_prob_gr
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_COMBINED)), 
            recurse = TRUE)
 
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(longitude, latitude, year, numerator, denominator, prevalence, mutation, country_name)
+  select(study_id, survey_id, longitude, latitude, year, numerator, denominator, prevalence, mutation, country_name)
 
 shape_Africa <- readRDS("R_ignore/R_scripts/data/shapefiles/sf_admin0_africa.rds")
 shape_water  <- sf::st_read("R_ignore/R_scripts/data/shapefiles/africa_water_bodies.shp", quiet = TRUE)
@@ -371,7 +245,6 @@ for (mut in all_who_mutations){
       x_axis_break = 5,
       y_axis_break = 5,
       facet_n_row = 2,
-      points_df = points_df,
       add_legend  = TRUE,
       viridis = TRUE
     ) +
@@ -398,7 +271,7 @@ for (mut in all_who_mutations){
         fontface = "plain",
         size = 18,
         x = 0.5,
-        y = 0.98,
+        y = 0.97,
         hjust = 0.5
       ) +
       draw_plot(
@@ -409,8 +282,8 @@ for (mut in all_who_mutations){
           ncol = 1,
           labels = c("A", "B", "C"),
           label_size = 18,
-          label_x = 0.02,
-          label_y = 0.98,
+          label_x = 0.0001,
+          label_y = 0.99,
           rel_heights = c(1, 1, 1)
         ),
         x = 0,

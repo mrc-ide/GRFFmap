@@ -84,7 +84,6 @@ pp_cols<- c(
 pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 70, 90, 95 , 100))
 
 # --- Loop over each mutation ------------------------------
-mut <- "k13:comb"
 for (mut in all_who_mutations){
   message("Processing ", mut)
   clean_mut <- paste0("k13 ", gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut))
@@ -126,7 +125,7 @@ for (mut in all_who_mutations){
       xlim = c(28, 32),
       ylim = c(-4, 0)
     )
-    axis_break = 2
+    axis_break = 1.5
   }
   
   # --- Crop Africa polygons ---------------------------------------------------
@@ -325,6 +324,7 @@ for (mut in all_who_mutations){
     x_axis_break = axis_break,
     y_axis_break = axis_break,
     points_df   = points_df_2y,
+    viridis = TRUE,
     add_legend = TRUE
     )
   
@@ -336,6 +336,7 @@ for (mut in all_who_mutations){
     lims        = mut_lims,
     x_axis_break = axis_break,
     y_axis_break = axis_break,
+    viridis = TRUE,
     add_legend = TRUE
   )
   
@@ -347,7 +348,8 @@ for (mut in all_who_mutations){
                                    legend_title = expression(Pr(Prevalence >= 1*"%")),
                                    lims         = mut_lims,
                                    x_axis_break = axis_break,
-                                   y_axis_break = axis_break
+                                   y_axis_break = axis_break,
+                                   add_legend = TRUE
                                    )
   plot_exceed_5 <- plot_exceedance(exceed_prob_long_5_avg_2y, 
                                    title_text = clean_mut, 
@@ -356,7 +358,9 @@ for (mut in all_who_mutations){
                                    legend_title =expression(Pr(Prevalence >= 5*"%")),
                                    lims         = mut_lims,
                                    x_axis_break = axis_break,
-                                   y_axis_break = axis_break)
+                                   y_axis_break = axis_break,
+                                   add_legend = TRUE
+                                   )
   plot_exceed_10 <- plot_exceedance(exceed_prob_long_10_avg_2y, 
                                     title_text = clean_mut, 
                                     shp          = shape_Africa_crop,
@@ -364,21 +368,29 @@ for (mut in all_who_mutations){
                                     legend_title =expression(Pr(Prevalence >= 10*"%")),
                                     lims         = mut_lims,
                                     x_axis_break = axis_break,
-                                    y_axis_break = axis_break)
+                                    y_axis_break = axis_break,
+                                    add_legend = TRUE
+                                    )
   
   # --- Save plots -------------------------------------------------------------
-  save_figs(file.path(OUT_MEAN_DIR, paste0(mut, "_mean_perc_prev")), plot_mean, width = 10)
-  save_figs(file.path(OUT_MEAN_DIR, paste0(mut, "_mean_perc_prev_no_points")), plot_mean_no_points, width = 10)
+  if (mut == "k13:comb"){
+    plot_height = 3.1
+  } else {
+    plot_height = 3.2
+  }
   
-  save_figs(file.path(OUT_MEDIAN_DIR, paste0(mut, "_median_perc_prev")), plot_median, width = 10)
-  save_figs(file.path(OUT_MEDIAN_DIR, paste0(mut, "_median_perc_prev_no_points")), plot_median_no_points, width = 10)
+  save_figs(file.path(OUT_MEAN_DIR, paste0(mut, "_mean_perc_prev")), plot_mean, width = 10, height = plot_height)
+  save_figs(file.path(OUT_MEAN_DIR, paste0(mut, "_mean_perc_prev_no_points")), plot_mean_no_points, width = 10, height = plot_height)
   
-  save_figs(file.path(OUT_CI_DIR, paste0(mut, "_CI_diff_prev")), plot_CI, width = 10)
-  save_figs(file.path(OUT_CI_DIR, paste0(mut, "_CI_diff_prev_no_points")), plot_CI_no_points, width = 10)
+  save_figs(file.path(OUT_MEDIAN_DIR, paste0(mut, "_median_perc_prev")), plot_median, width = 10, height = plot_height)
+  save_figs(file.path(OUT_MEDIAN_DIR, paste0(mut, "_median_perc_prev_no_points")), plot_median_no_points, width = 10, height = plot_height)
+  
+  save_figs(file.path(OUT_CI_DIR, paste0(mut, "_CI_diff_prev")), plot_CI, width = 10, height = plot_height)
+  save_figs(file.path(OUT_CI_DIR, paste0(mut, "_CI_diff_prev_no_points")), plot_CI_no_points, width = 10, height = plot_height)
 
-  save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_1")), plot_exceed_1, width = 10)
-  save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_5")), plot_exceed_5, width = 10)
-  save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_10")), plot_exceed_10, width = 10)
+  save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_1")), plot_exceed_1, width = 10, height = plot_height)
+  save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_5")), plot_exceed_5, width = 10, height = plot_height)
+  save_figs(file.path(OUT_EXCEED_DIR, paste0(mut, "_exceednace_prob_10")), plot_exceed_10, width = 10, height = plot_height)
   
   print(paste0("Saved figures for ", mut)) 
 }

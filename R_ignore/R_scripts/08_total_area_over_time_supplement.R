@@ -19,85 +19,25 @@ OUT_BASE       <- "GRFF_updated_maps"
 OUT_PLOT_DIR <- "total_speed_spread"
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_PLOT_DIR)))
 
-# --- Cache helpers -----------------------------------------------------------
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet")) {
-  ext <- match.arg(ext)
-  fn  <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                 gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
-  file.path(CACHE_DIR, fn)
-}
-
-make_or_load <- function(mut, ell_km, tau2) {
-  cached_rds <- cache_path(mut, ell_km, tau2, "full_model_output", "rds") 
-  stopifnot(file_exists(cached_rds))
-  readRDS(cached_rds)
-}
-
-make_raster_long <- function(arr3, xs, ys, times) {
-  nx <- length(xs); ny <- length(ys)
-  
-  df <- do.call(rbind, lapply(seq_along(times), function(k) {
-    data.frame(
-      x = rep(xs, times = ny),
-      y = rep(ys, each  = nx),
-      p = as.vector(arr3[ , , k]),
-      t = factor(times[k], levels = times)
-    )
-  }))
-  
-  df %>%
-    dplyr::mutate(t = as.numeric(as.character(t))) %>%
-    dplyr::filter(t %in% plot_times)
-}
-
 # --- Data I/O --------------------------------------------------------
 shape_Africa <- readRDS("R_ignore/R_scripts/data/shapefiles/sf_admin0_africa.rds")
 shape_water  <- sf::st_read("R_ignore/R_scripts/data/shapefiles/africa_water_bodies.shp", quiet = TRUE)
 
-dat <- read.csv("R_ignore/R_scripts/data/all_who_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(
     collection_day  = as.Date(collection_day),
     collection_year = lubridate::year(collection_day)
   )
 
 # --------------------------- Add K13 overall data ----------------------------
-k13_any_site_year <- dat %>%
-  # keep only K13 mutations; adjust this filter to your naming convention
-  filter(grepl("^k13", mutation, ignore.case = TRUE)) %>%
-  group_by(year, longitude, latitude) %>%
-  summarise(
-    numerator = sum(numerator, na.rm = TRUE),
-    denominator = max(denominator, na.rm = TRUE),
-    prevalence = numerator / denominator *100,
-    .groups = "drop"
-  ) %>%
-  transmute(
-    year,
-    longitude = longitude,
-    latitude  = latitude,
-    mutation  = "k13:comb", 
-    numerator = numerator,
-    denominator = denominator,
-    prevalence = prevalence
-  )
-
-dat_with_k13 <- dat %>%
-  bind_rows(k13_any_site_year) %>%
-  arrange(year, longitude, latitude, mutation)
+dat_with_k13 <- add_combined_k13(dat)
 
 # --- Parameters ---------------------------------------------------------------
-# choose a single run to (re)plot from cache
-ell_km <- 80          # RFF length-scale in **kilometres**
-tau2   <- 0.1         # RW1 variance in feature space
 plot_times <- seq(2012, 2023, by = 1)
 
 # prediction parameters
 nx <- 200
 ny <- 200
-
-# Area parameters
-q_thr <- 0.80      # exceedance-probability threshold
-D     <- 1000       # resamples for ribbon
 
 EA_long_lim <- c(15, 52)
 EA_lat_lim  <- c(-12, 18)
@@ -111,6 +51,7 @@ all_who_mutations <- c(
   "k13:561:H",   "k13:574:L", "k13:580:Y", "k13:441:L", "k13:449:A", 
   "k13:469:F",   "k13:481:V", "k13:515:K", "k13:527:H",  "k13:537:I", 
   "k13:537:D", "k13:538:V",  "k13:568:G")
+
 area_ts_list <- list()
 for (mut in all_who_mutations){
   print(paste0("Processing ", mut, "........."))
@@ -124,7 +65,7 @@ for (mut in all_who_mutations){
   if (!any(dat_sub$prevalence > 0, na.rm = TRUE)) next
   
   # load cached model output (skip cleanly if missing)
-  cached <- try(make_or_load(mut, ell_km, tau2), silent = TRUE)
+  cached <- make_or_load(mut)
   
   exceed_prob_draws <- cached$exceed_post_draw_list
   exceed_prob_draws_1 <- exceed_prob_draws$`1`
