@@ -215,6 +215,8 @@ plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
 lines(hgrid, pred, lwd=2)
 dev.off()
 
+message("Estimated length-scale ell_km = ", ell_km_hat)
+
 # --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
 
 # Extract time index from spatiotemporal object
@@ -281,6 +283,8 @@ plot(
 # Fitted RW line: gamma(h) = b_hat * h
 abline(a = 0, b = b_hat, lwd = 2)
 dev.off()
+
+message("Estimated RW1 variance tau2 = ", tau2_hat)
 
 # ==============================================================================
 # Spatiotemporal model
