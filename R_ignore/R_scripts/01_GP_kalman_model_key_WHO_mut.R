@@ -40,15 +40,15 @@ p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 100         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 200
-ny <- 200
+nx <- 100
+ny <- 100
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
@@ -210,7 +210,7 @@ ell_km_hat <- range_hat / sqrt(2)
 hgrid <- seq(0, max(h), length.out = 500)
 pred  <- nugget_fix + psill_hat * (1 - exp(-(hgrid / range_hat)^2))
 
-pdf(paste0(CACHE_DIR, "/", mut, "variogram_1year_spatial.pdf"), width = 6, height = 5)
+png(paste0(CACHE_DIR, "/", mut, "variogram_1year_spatial.png"), width = 6, height = 5, units = "in", res = 300)
 plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
 lines(hgrid, pred, lwd=2)
 dev.off()
@@ -270,7 +270,7 @@ tau2_hat_day <- 2 * b_hat
 tau2_hat <- tau2_hat_day * 365
 
 # Final plot with fitted line
-pdf(paste0(CACHE_DIR, "/", mut, "temporal_variogram_rw_fit.pdf"), width = 6, height = 5)
+png(paste0(CACHE_DIR, "/", mut, "temporal_variogram_rw_fit.png"), width = 6, height = 5, units = "in", res = 300)
 plot(
   gamma ~ dist,
   data = vg_t,
