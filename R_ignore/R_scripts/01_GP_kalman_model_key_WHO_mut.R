@@ -178,7 +178,7 @@ h  <- df$dist
 g  <- df$gamma
 w <- sqrt(df$np)
 
-nugget_fix <- 0.2
+nugget_fix <- 0.1
 
 gamma_gauss_fixnug <- function(h, psill, range) {
   nugget_fix + psill * (1 - exp(-(h / range)^2))
