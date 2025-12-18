@@ -29,7 +29,7 @@
 #' @export
 get_east_africa_bbox <- function(target_crs) {
   sf::st_bbox(
-    c(xmin = 28.48, xmax = 44.5, ymin = -4.60, ymax = 16.00),
+    c(xmin = 27, xmax = 44.5, ymin = -5, ymax = 17.50),
     crs = target_crs
   )
 }
