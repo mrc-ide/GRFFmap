@@ -40,22 +40,22 @@ p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 100         # number of random frequencies (try 200–500)
+D        <- 500         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
 
 # prediction parameters
-nx <- 100
-ny <- 100
+nx <- 200
+ny <- 200
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
 plot_times <- seq(2012, 2025, by = 1)
 
 # posterior draws
-num_post_draws <- 100 
+num_post_draws <- 1000 
 
 # parameters for exceedance plot
 cell_size_km <- 5
@@ -64,6 +64,7 @@ q_thr <- 0.80   # probability threshold for exceedance probability
 bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
+VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
 CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
 dir_create(CACHE_DIR)
 
@@ -132,85 +133,70 @@ dat_sub$Ykm <- xy_km[, 2]
 # ==============================================================================
 
 # --- Spatial variogram to estimate the spatial length-scale ell_km ------------
-# Construct a spatiotemporal object (STIDF) from the data subset
-# Spatial coordinates in kilometres (projected coordinates)
-sp_pts <- sp::SpatialPoints(dat_sub[, c("Xkm", "Ykm")])
-
-# Create time index where time is treated as numeric across all years in dat_sub
-time_idx <- as.POSIXct(paste0(dat_sub$year, "-07-01"), tz = "UTC")
-
-# Combine spatial points + time index + observed values into a spacetime object
-st_obj <- spacetime::STIDF(sp_pts, time_idx, data = data.frame(z = dat_sub$z))
-
-# Compute spatiotemporal variogram, then isolate the ~1-year temporal slice
-# Small tolerance around 365 days to catch "approximately one year apart" pairs
-eps_days <- 0.5
-
-# Compute spatiotemporal variogram
-coords <- as.matrix(dat_sub[, c("Xkm","Ykm")])
-dmax <- max(sp::spDists(coords, longlat = FALSE), na.rm = TRUE)
-
-vg_st_1year <- variogramST(
-  z ~ 1,
-  data   = st_obj,
-  tlags  = c(365 - eps_days, 365 + eps_days, 3 * 365),  # boundaries for ≤2 years
-  tunit  = "days",
-  cutoff = dmax,
-  width  = 25
-)
-
-# Extract only the ~1-year temporal lag bin
-vg_1y <- subset(vg_st_1year, timelag == 365)
-# Keep only spatial variogram columns
-vg_1y_sp <- vg_1y[, c("dist", "gamma", "np")]
-
-# Defensive casting to numeric (variogramST output can sometimes be factor-like)
-vg_1y_sp$dist  <- as.numeric(vg_1y_sp$dist)
-vg_1y_sp$gamma <- as.numeric(vg_1y_sp$gamma)
-vg_1y_sp$np    <- as.numeric(vg_1y_sp$np)
-
-# Assign gstat variogram class so gstat plotting/fitting methods work
-vg_1y_sp <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & is.finite(np) & np > 0)
-class(vg_1y_sp) <- c("gstatVariogram","data.frame")
+vg_1y_sp <- readRDS(file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_distance_space.rds")))
 
 df <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & dist > 0)
 h  <- df$dist
 g  <- df$gamma
 w <- sqrt(df$np)
 
-nugget_fix <- 0.1
+# nugget_fix <- 0.1
 
-gamma_gauss_fixnug <- function(h, psill, range) {
-  nugget_fix + psill * (1 - exp(-(h / range)^2))
+# gamma_gauss_fixnug <- function(h, psill, range) {
+#   nugget_fix + psill * (1 - exp(-(h / range)^2))
+# }
+
+# obj_wls_fixnug <- function(par_log) {
+#   psill <- exp(par_log[1])
+#   range <- exp(par_log[2])
+#   pred  <- gamma_gauss_fixnug(h, psill, range)
+#   sum(w * (g - pred)^2)
+# }
+
+# # starts (partial sill should exclude nugget)
+# psill0 <- max(1e-8, median(g, na.rm = TRUE) - nugget_fix)
+# range0 <- median(h, na.rm = TRUE)
+
+# fit <- optim(
+#   par    = log(c(psill0, range0)),
+#   fn     = obj_wls_fixnug,
+#   method = "Nelder-Mead"
+# )
+
+# psill_hat  <- exp(fit$par[1])
+# range_hat  <- exp(fit$par[2])
+# nugget_hat <- nugget_fix
+
+# ell_km_hat <- range_hat / sqrt(2)
+
+# hgrid <- seq(0, max(h), length.out = 500)
+# pred  <- nugget_fix + psill_hat * (1 - exp(-(hgrid / range_hat)^2))
+
+gamma_gauss_nonug <- function(h, psill, range) {
+  psill * (1 - exp(-(h / range)^2))   # no nugget term
 }
 
-obj_wls_fixnug <- function(par_log) {
+obj_wls_nonug <- function(par_log) {
   psill <- exp(par_log[1])
   range <- exp(par_log[2])
-  pred  <- gamma_gauss_fixnug(h, psill, range)
+  pred  <- gamma_gauss_nonug(h, psill, range)
   sum(w * (g - pred)^2)
 }
 
-# starts (partial sill should exclude nugget)
-psill0 <- max(1e-8, median(g, na.rm = TRUE) - nugget_fix)
-range0 <- median(h, na.rm = TRUE)
+# starts
+psill0 <- max(1e-8, median(g, na.rm=TRUE))   # no need to subtract nugget
+range0 <- median(h, na.rm=TRUE)
 
-fit <- optim(
-  par    = log(c(psill0, range0)),
-  fn     = obj_wls_fixnug,
-  method = "Nelder-Mead"
-)
+fit <- optim(log(c(psill0, range0)), obj_wls_nonug, method="Nelder-Mead")
 
-psill_hat  <- exp(fit$par[1])
-range_hat  <- exp(fit$par[2])
-nugget_hat <- nugget_fix
-
+psill_hat <- exp(fit$par[1])
+range_hat <- exp(fit$par[2])
 ell_km_hat <- range_hat / sqrt(2)
 
 hgrid <- seq(0, max(h), length.out = 500)
-pred  <- nugget_fix + psill_hat * (1 - exp(-(hgrid / range_hat)^2))
+pred  <- gamma_gauss_nonug(hgrid, psill_hat, range_hat)
 
-png(paste0(CACHE_DIR, "/", mut, "variogram_1year_spatial.png"), width = 6, height = 5, units = "in", res = 300)
+png(paste0(CACHE_DIR, "/", mut, "_variogram_1year_spatial.png"), width = 6, height = 5, units = "in", res = 300)
 plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
 lines(hgrid, pred, lwd=2)
 dev.off()
@@ -219,50 +205,10 @@ message("Estimated length-scale ell_km = ", ell_km_hat)
 
 # --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
 
-# Extract time index from spatiotemporal object
-t_idx <- spacetime::index(st_obj@time)
-# Maximum temporal separation across all observation pairs (in days)
-max_lag_days <- as.numeric(diff(range(t_idx)), units = "days")
-
-# Define temporal lag bins from 0 to maximum lag; here we bin by 180 days = 6 months
-tlags_days <- seq(0, max_lag_days, by = 180)
-
-# Compute spatiotemporal variogram
-vg_st_time <- variogramST(
-  z ~ 1,
-  data   = st_obj,
-  tlags  = tlags_days,  # covers ALL time lags in your data
-  tunit  = "days",
-  cutoff = 25,          # only pairs with distance ≤ 50 km
-  width  = 25           # 1 spatial bin: [0, 50) km
-)
-
-# Sanity check: should be a single spatial bin (~25 km midpoint)
-# unique(vg_st_time$dist)
-
-# Extract temporal variogram (collapse spatial dimension)
-vg_t <- vg_st_time[, c("timelag", "gamma", "np")]
-names(vg_t)[names(vg_t) == "timelag"] <- "dist"   # rename for gstat
-
-# Remove bins with undefined or non-finite estimates
-vg_t <- vg_t[is.finite(vg_t$dist) & is.finite(vg_t$gamma), ]
-
-# Ensure numeric columns (defensive programming)
-vg_t$dist  <- as.numeric(vg_t$dist)   # time lag in days
-vg_t$gamma <- as.numeric(vg_t$gamma)
-vg_t$np    <- as.numeric(vg_t$np)
-
-# Set class so gstat methods (plot, fit.variogram, etc.) work correctly
-class(vg_t) <- c("gstatVariogram", "data.frame")
-
-# Visual inspection of temporal variogram
-# plot(gamma ~ dist, data = vg_t,
-#      xlab = "Time lag (days)", ylab = "Semivariance",
-#      main = "Temporal variogram (pairs ≤ 25 km)")
+vg_t <- readRDS(file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_distance_time.rds")))
 
 # Estimate RW variance via weighted linear regression (model: gamma(h) = 0.5 * tau^2 * h)
 lm_rw0 <- lm(gamma ~ 0 + dist, data = vg_t, weights = np)
-# summary(lm_rw0)
 
 # Estimated slope
 b_hat <- coef(lm_rw0)[["dist"]]   # slope
@@ -272,7 +218,7 @@ tau2_hat_day <- 2 * b_hat
 tau2_hat <- tau2_hat_day * 365
 
 # Final plot with fitted line
-png(paste0(CACHE_DIR, "/", mut, "temporal_variogram_rw_fit.png"), width = 6, height = 5, units = "in", res = 300)
+png(paste0(CACHE_DIR, "/", mut, "_temporal_variogram_rw_fit.png"), width = 6, height = 5, units = "in", res = 300)
 plot(
   gamma ~ dist,
   data = vg_t,

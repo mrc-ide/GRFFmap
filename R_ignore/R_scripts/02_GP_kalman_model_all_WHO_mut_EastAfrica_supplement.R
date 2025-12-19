@@ -32,8 +32,8 @@ t0 <- Sys.time()
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 166.883369930852          # RFF length-scale in **kilometres**
-tau2   <- 0.280083398594692         # RW1 variance in feature space
+ell_km <- 57.2815967665492         # RFF length-scale in **kilometres**
+tau2   <- 0.275542312057704        # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
