@@ -28,7 +28,9 @@ t0 <- Sys.time()
 
 # --- Define K13 mutants -------------------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
-mut <- args[[1]]
+mut <- "mdr1:86:Y"
+# "crt:76:T"
+# "mdr1:86:Y"
 
 # Per-mutation clock start
 mut_t0 <- Sys.time()

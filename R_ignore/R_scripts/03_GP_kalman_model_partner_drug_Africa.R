@@ -26,33 +26,13 @@ sf_use_s2(FALSE)
 # clock time
 t0 <- Sys.time()
 
-# build consistent filenames per (mutation, length_space, length_time, n_features)
-cache_path <- function(mut, lenS, lenT, what, ext = c("rds","parquet","rds.gz")) {
-  ext <- match.arg(ext)
-  fn <- sprintf("%s_lenS%s_lenT%s_%s.%s",
-                gsub("[:/ ]", "_", mut), lenS, lenT, what, ext)
-  file.path(CACHE_DIR, fn)
-}
-
-# NA-robust row mean for 0/1 matrices
-.row_mean01 <- function(X01) {
-  Dk   <- rowSums(!is.na(X01))
-  succ <- rowSums(X01, na.rm = TRUE)
-  ifelse(Dk > 0L, succ / Dk, NA_real_)
-}
-
-# Per-time exceedance from draws: Pk is [M x D] (M = nx*ny)
-exceed_prob_from_draws <- function(Pk, p_thr) {
-  .row_mean01(Pk > p_thr)  # length M
-}
-
 # --------------------------- Load & filter data ----------------------------
-
+VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
 CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_partner_drug_cache_annual_1995_2024/"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
-dat <- read.csv("R_ignore/R_scripts/data/partner_drug_calc_get_prevalence.csv") |>
+dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
   select(longitude, latitude, year, numerator, denominator, prevalence, mutation)
 
@@ -60,21 +40,6 @@ dat <- read.csv("R_ignore/R_scripts/data/partner_drug_calc_get_prevalence.csv") 
 shape_Africa <- readRDS("R_ignore/R_scripts/data/shapefiles/sf_admin0_africa.rds")
 shape_water  <- sf::st_read("R_ignore/R_scripts/data/shapefiles/africa_water_bodies.shp", quiet = TRUE)
 africa_shp_admin1 <- readRDS(file = "R_ignore/R_scripts/data/sf_admin1_africa.rds")
-
-# --------------------------- Fliter admin regions ----------------------------
-target_crs <- 4326
-africa_shp_admin1 <- st_transform(africa_shp_admin1, crs = target_crs)
-
-# Define East Africa box and crop Admin1 shapefile
-bbox_east_africa <- st_bbox(c(
-  xmin = 28.48,
-  xmax = 48.43,
-  ymin = -4.6,
-  ymax = 15.29
-), crs = target_crs)
-
-# Using the cropped Admin 1 data for East Africa
-admin1_regions <- st_make_valid(africa_shp_admin1) |> st_crop(bbox_east_africa)
 
 # --------------------------- Fliter Africa shape ----------------------------
 grey_countries <- c(
@@ -117,11 +82,11 @@ t_num <- length(t_vec)
 plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
 
 # posterior draws
-n_post_draws <- 1000
+n_post_draws <- 100
 
 # --------------------------- Define PD mutants ----------------------------
 # which mutation we are focusing on
-all_who_mutations <- c("mdr1C:86:N", "crt:76:T")
+all_who_mutations <- c("mdr1C:86:Y", "crt:76:T")
 all_who_mutations <- "crt:76:T"
 for (mut in all_who_mutations){
   mut_t0 <- Sys.time()  # per-mutation clock stars
@@ -131,20 +96,110 @@ for (mut in all_who_mutations){
     filter(mutation == mut) |>
     filter(is.finite(numerator), is.finite(denominator), denominator > 0)
   
-  # --- Project to local Cartesian (km) ----------------------------------------
-  proj <- project_to_local_laea(dat_sub,
-                                lon_col = "longitude",
-                                lat_col = "latitude",
-                                crs_ll  = 4326)
+  # --- Project to local Cartesian (km) ------------------------------------------
+  # Center projection on study area for good local properties
+  lon0 <- median(dat_sub$longitude, na.rm = TRUE)
+  lat0 <- median(dat_sub$latitude,  na.rm = TRUE)
   
-  xy_km        <- proj$xy_km
-  dat_sub$Xkm  <- xy_km[, 1]
-  dat_sub$Ykm  <- xy_km[, 2]
-  crs_laea     <- proj$crs_laea 
-  lon0         <- proj$lon0 
-  lat0         <- proj$lat0
+  # Local Lambert Azimuthal Equal-Area (units: meters)
+  crs_laea <- paste0(
+    "+proj=laea +lat_0=", lat0,
+    " +lon_0=", lon0,
+    " +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+  )
   
-  # --- Random Fourier Features ------------------------------------------------
+  # Make sf points and transform
+  pts_ll <- st_as_sf(dat_sub, coords = c("longitude", "latitude"), crs = 4326)
+  pts_xy <- st_transform(pts_ll, crs_laea)
+  
+  # Extract projected coordinates in **km**
+  xy_m <- st_coordinates(pts_xy)
+  xy_km <- xy_m / 1000
+  dat_sub$Xkm <- xy_km[, 1]
+  dat_sub$Ykm <- xy_km[, 2]
+  
+  # ==============================================================================
+  # Variogram analysis to identify optimal length space parameter (ell_km) 
+  # and temporal variance (tau2)
+  # ==============================================================================
+  
+  # --- Spatial variogram to estimate the spatial length-scale ell_km ------------
+  vg_1y_sp <- readRDS(file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_distance_space.rds")))
+  
+  df <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & dist > 0)
+  h  <- df$dist
+  g  <- df$gamma
+  w <- sqrt(df$np)
+  
+  gamma_gauss_nonug <- function(h, psill, range) {
+    psill * (1 - exp(-(h / range)^2))   # no nugget term
+  }
+  
+  obj_wls_nonug <- function(par_log) {
+    psill <- exp(par_log[1])
+    range <- exp(par_log[2])
+    pred  <- gamma_gauss_nonug(h, psill, range)
+    sum(w * (g - pred)^2)
+  }
+  
+  # starts
+  psill0 <- max(1e-8, median(g, na.rm=TRUE))   # no need to subtract nugget
+  range0 <- median(h, na.rm=TRUE)
+  
+  fit <- optim(log(c(psill0, range0)), obj_wls_nonug, method="Nelder-Mead")
+  
+  psill_hat <- exp(fit$par[1])
+  range_hat <- exp(fit$par[2])
+  ell_km_hat <- range_hat / sqrt(2)
+  
+  hgrid <- seq(0, max(h), length.out = 500)
+  pred  <- gamma_gauss_nonug(hgrid, psill_hat, range_hat)
+  
+  png(paste0(CACHE_DIR, "/", mut, "_variogram_1year_spatial.png"), width = 6, height = 5, units = "in", res = 300)
+  plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
+  lines(hgrid, pred, lwd=2)
+  dev.off()
+  
+  message("Estimated length-scale ell_km = ", ell_km_hat)
+  
+  # --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
+  
+  vg_t <- readRDS(file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_distance_time.rds")))
+  
+  # Estimate RW variance via weighted linear regression (model: gamma(h) = 0.5 * tau^2 * h)
+  lm_rw0 <- lm(gamma ~ 0 + dist, data = vg_t, weights = np)
+  
+  # Estimated slope
+  b_hat <- coef(lm_rw0)[["dist"]]   # slope
+  
+  # Convert slope to RW variance parameter
+  tau2_hat_day <- 2 * b_hat
+  tau2_hat <- tau2_hat_day * 365
+  
+  # Final plot with fitted line
+  png(paste0(CACHE_DIR, "/", mut, "_temporal_variogram_rw_fit.png"), width = 6, height = 5, units = "in", res = 300)
+  plot(
+    gamma ~ dist,
+    data = vg_t,
+    xlab = "Time lag (days)",
+    ylab = "Semivariance",
+    main = "Temporal variogram with RW fit (intercept fixed at 0)"
+  )
+  # Fitted RW line: gamma(h) = b_hat * h
+  abline(a = 0, b = b_hat, lwd = 2)
+  dev.off()
+  
+  message("Estimated RW1 variance tau2 = ", tau2_hat)
+  
+  # ==============================================================================
+  # Spatiotemporal model
+  # ==============================================================================
+  tau2 <- tau2_hat
+  ell_km <- ell_km_hat
+  
+  message("Optimal parameters are. tau2 = ", tau2, "and ell_km = ", ell_km)
+  
+  # --- Random Fourier Features --------------------------------------------------
   # Draw D frequencies ω_j ~ N(0, ℓ⁻² I₂), ℓ in **km**
   Omega <- matrix(rnorm(D * 2, mean = 0, sd = 1 / ell_km), ncol = 2)  # [D x 2]
   
@@ -154,11 +209,11 @@ for (mut in all_who_mutations){
     cbind(cos(OS), sin(OS)) * (1 / sqrt(D))            # (n x 2D)
   }
   
-  # --------------------------- Create grid for prediction -----------------------
+  # --- Create grid for prediction ---------------------------------------------------
   # Grid
   xs <- seq(lon_min, lon_max, length.out = nx)
   ys <- seq(lat_min, lat_max, length.out = ny)
-  M <- nx * ny
+  M  <- nx * ny
   
   # Build lon/lat grid, then project to km for features
   grid_ll <- expand.grid(lon = xs, lat = ys)
@@ -168,22 +223,19 @@ for (mut in all_who_mutations){
   grid_km <- grid_m / 1000
   
   # Φ on projected grid (km)
-  OS_full   <- grid_km %*% t(Omega) # Dot product of a location's coordinates and a random frequency vector (output: M x D matrix)
-  Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D)) # Feature Matrix: approximate a covariance function
+  OS_full   <- grid_km %*% t(Omega)
+  Phi_full  <- cbind(cos(OS_full), sin(OS_full)) * (1 / sqrt(D))
   
-  # Storage for means (and later, CIs) at plot_times
-  z_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_mean <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_mean_draw <- array(NA, dim = c(nx, ny, length(plot_times)))
+  # Storage for means (and later, CIs) at t_vec
+  z_post_mean <- array(NA, dim = c(nx, ny, length(t_vec)))
+  p_post_mean <- array(NA, dim = c(nx, ny, length(t_vec)))
   
   # uncertainty containers
-  z_post_sd   <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_lo   <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_hi   <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_lo_draw   <- array(NA, dim = c(nx, ny, length(plot_times)))
-  p_post_hi_draw  <- array(NA, dim = c(nx, ny, length(plot_times)))
+  z_post_sd   <- array(NA, dim = c(nx, ny, length(t_vec)))
+  p_post_lo   <- array(NA, dim = c(nx, ny, length(t_vec)))
+  p_post_hi   <- array(NA, dim = c(nx, ny, length(t_vec)))
   
-  # --------------------------- Organize by time ------------------------------
+  # --- Organize by time ---------------------------------------------------------
   # For each time index, collect projected coords and Binomial stats
   
   obs_by_t <- vector("list", t_num)
@@ -217,9 +269,9 @@ for (mut in all_who_mutations){
     message(sprintf("\nEM iteration %d/%d", i, max_iter))
     
     # ===== E-step: Expected PG weights =======================================
-    #
     Omega_list <- vector("list", t_num)
     r_list     <- vector("list", t_num)
+    
     for (ti in 1:t_num) {
       ob <- obs_by_t[[ti]]
       if (!is.null(ob)) {
@@ -228,8 +280,7 @@ for (mut in all_who_mutations){
         n_t    <- ob$n
         kappa  <- ob$kappa
         
-        # Current linear predictor z_t(s) = μ + Φ w_t (current prev map)
-        # Phi_t is the weight at time t
+        # Current linear predictor z_t(s) = μ + Φ w_t
         z_t <- as.vector(mu_t + Phi_t %*% m_w[, ti])
         
         # Expected PG weights: E[ω] = (n / (2|z|)) * tanh(|z|/2)
@@ -320,167 +371,182 @@ for (mut in all_who_mutations){
     rel_change <- num / den
     
     message(sprintf("  pseudo-Gaussian log-lik: %.3f,  rel_change(w): %.3e", ll_sum, rel_change))
+    
+    # ============================================================
+    # Plot on-the-fly for checking
+    # ============================================================
+    
+    if (FALSE) {
+      
+      for (k in seq_along(plot_times)) {
+        t_idx <- which(t_vec == plot_times[k])
+        
+        # Mean z on grid
+        z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
+        
+        # Var[z] on grid: diag(Phi_full P_t Phi_full')
+        # Efficient diagonal via row-wise quadratic form:
+        #  V = rowSums( (Phi_full %*% P_t) * Phi_full )
+        P_t <- C_smooth[[t_idx]]
+        PhiP <- Phi_full %*% P_t               # [M x 2D]
+        z_var_vec <- rowSums(PhiP * Phi_full)  # elementwise product, row-sum
+        z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
+        
+        # Transform to prevalence and 95% pointwise intervals
+        p_mean_vec <- plogis(z_mean_vec)
+        p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
+        p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
+        
+        # Store as [nx x ny]
+        z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+        p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
+        z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+        p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+        p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
+      }
+      
+      # Long df for raster plotting (lon/lat axes)
+      p_long <- do.call(rbind, lapply(seq_along(plot_times), function(k) {
+        data.frame(
+          x = rep(xs, times = ny),
+          y = rep(ys, each  = nx),
+          p = as.vector(p_post_mean[, , k]),
+          t = factor(plot_times[k], levels = plot_times)
+        )
+      }))
+      
+      # Base facet raster
+      plot1 <- ggplot() + theme_bw() +
+        geom_raster(aes(x = x, y = y, fill = p), data = p_long) +
+        coord_fixed(expand = FALSE) +
+        scale_fill_viridis_c(option = "magma", name = "Prevalence") +
+        facet_wrap(~ t, nrow = 2) +
+        labs(x = "Longitude", y = "Latitude") + 
+        ggtitle(sprintf("EM step %s", i))
+      
+      print(plot1)
+      
+    }
   }
   
-  # ============================================================
-  # Reconstruct z_t(s) and prevalence on lon/lat grid (for plotting)
-  # ============================================================
-  posterior_draws_list <- list()
-  for (k in seq_along(plot_times)) {
-    t_idx <- which(t_vec == plot_times[k])
+  # ================================================
+  # Joint posterior sampling of β_t and surfaces
+  # ================================================
+  
+  # Storage:
+  # - beta_draws:  (2D x t_num x B)      feature-space trajectories
+  # - p_draws:     (nx x ny x t_num x B) prevalence surfaces
+  beta_draws <- array(NA_real_, dim = c(2 * D, t_num, num_post_draws))
+  p_draws    <- array(NA_real_, dim = c(nx, ny, t_num, num_post_draws))
+  
+  for (b in 1:num_post_draws) {
+    message(sprintf("Posterior draw %s of %s", b, num_post_draws))
     
-    # Mean z on grid
-    z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
+    # --------------------------------------------
+    # 1. Backward sampling in feature space (β_t)
+    # --------------------------------------------
+    beta_b <- matrix(NA_real_, nrow = 2 * D, ncol = t_num)
     
-    # Var[z] on grid: diag(Phi_full P_t Phi_full')
-    # Efficient diagonal via row-wise quadratic form:
-    #  V = rowSums( (Phi_full %*% P_t) * Phi_full )
-    P_t <- C_smooth[[t_idx]]
-    PhiP <- Phi_full %*% P_t               # [M x 2D]
-    z_var_vec <- rowSums(PhiP * Phi_full)  # elementwise product, row-sum
-    z_sd_vec  <- sqrt(pmax(z_var_vec, 0))
+    # Sample final time T from N(m_filt[,T], C_filt[[T]])
+    T_idx <- t_num
+    P_T   <- forceSymmetric(C_filt[[T_idx]])
+    Rch_T <- chol(P_T)
+    eta_T <- rnorm(2 * D)
+    beta_b[, T_idx] <- as.numeric(m_filt[, T_idx] + Rch_T %*% eta_T)
     
-    # Transform to prevalence and 95% pointwise intervals
-    # p_mean_vec <- plogis(z_mean_vec)
-    # p_lo_vec   <- plogis(z_mean_vec - 1.96 * z_sd_vec)
-    # p_hi_vec   <- plogis(z_mean_vec + 1.96 * z_sd_vec)
-    # 
-    # Posterior draws
-    message(sprintf("Time Series Draws: %d ", n_post_draws))
-    L_t <- chol(P_t)
-    w_draws <- matrix(m_w[, t_idx], ncol = 1) + L_t %*% matrix(rnorm(ncol(P_t) * n_post_draws), ncol = n_post_draws)
-    z_draws <-as.matrix( z_init + Phi_full %*% w_draws)
-    p_draws <- plogis(z_draws)
-    posterior_draws_list[[k]] <- p_draws 
+    # Backward recursion for t = T-1,...,1
+    for (ti in (t_num - 1):1) {
+      # Filtered mean/cov at time t
+      a_t <- m_filt[, ti]                 # β_{t|t}
+      P_t <- forceSymmetric(C_filt[[ti]]) # P_{t|t}
+      
+      # One-step-ahead prediction at time t+1
+      a_tp1 <- m_pred[[ti + 1]]           # β_{t+1|t}
+      R_tp1 <- forceSymmetric(C_pred[[ti + 1]])  # P_{t+1|t}
+      
+      # Smoothing gain J_t = P_{t|t} (P_{t+1|t})^{-1}
+      Rch <- chol(R_tp1)
+      J_t <- P_t %*% solve(Rch, solve(t(Rch), Diagonal(nrow(R_tp1))))
+      
+      # Conditional mean and covariance of β_t | β_{t+1}, y
+      mean_t <- as.numeric(a_t + J_t %*% (beta_b[, ti + 1] - a_tp1))
+      Var_t  <- forceSymmetric(P_t - J_t %*% R_tp1 %*% t(J_t))
+      
+      # Draw β_t ~ N(mean_t, Var_t)
+      Rch_t <- chol(Var_t)
+      eta_t <- rnorm(2 * D)
+      beta_b[, ti] <- as.numeric(mean_t + Rch_t %*% eta_t)
+    }
     
-    # Calculate mean with CrI
-    p_mean_exact <- rowMeans(p_draws)
-    p_lo_exact   <- apply(p_draws, 1, quantile, 0.025, na.rm=TRUE)
-    p_hi_exact   <- apply(p_draws, 1, quantile, 0.975, na.rm=TRUE)
+    # Store β path
+    beta_draws[, , b] <- beta_b
     
-    # Store as [nx x ny]
-    z_post_mean[, , k] <- matrix(z_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-    #p_post_mean[, , k] <- matrix(p_mean_vec, nrow = nx, ncol = ny, byrow = FALSE)
-    z_post_sd[,   , k] <- matrix(z_sd_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-    #p_post_lo[,   , k] <- matrix(p_lo_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-    #p_post_hi[,   , k] <- matrix(p_hi_vec,   nrow = nx, ncol = ny, byrow = FALSE)
-    p_post_mean_draw[, , k] <- matrix(p_mean_exact, nx, ny, byrow = FALSE)
-    p_post_lo_draw[,   , k] <- matrix(p_lo_exact,   nx, ny, byrow = FALSE)
-    p_post_hi_draw[,   , k] <- matrix(p_hi_exact,   nx, ny, byrow = FALSE)
+    # --------------------------------------------
+    # 2. Map β_t path to full surfaces z(s,t), p(s,t)
+    # --------------------------------------------
+    for (ti in 1:t_num) {
+      z_vec <- as.numeric(z_init + Phi_full %*% beta_b[, ti])   # length M = nx*ny
+      z_mat <- matrix(z_vec, nrow = nx, ncol = ny, byrow = FALSE)
+      p_mat <- plogis(z_mat)
+      
+      p_draws[, , ti, b] <- p_mat
+    }
   }
-  
-  # ============================================================
-  # Time-series
-  # ============================================================
-  # Map grid to admin units
-  grid_sf <- st_as_sf(expand.grid(x = xs, y = ys), coords = c("x", "y"), crs = st_crs(admin1_regions))
-  points_to_regions <- st_join(grid_sf, admin1_regions %>% dplyr::select(id_1, name_0, name_1)) %>%
-    st_drop_geometry() %>%
-    mutate(pixel_index = 1:n()) %>%
-    drop_na(id_1)
-  
-  # Combine posterior draws across time
-  region_draws <- list()
-  for (k in seq_along(plot_times)) {
-    draws_k <- posterior_draws_list[[k]][points_to_regions$pixel_index, ]  # [pixels x draws]
-    
-    df <- as.data.frame(draws_k)
-    df$id_1 <- points_to_regions$id_1
-    
-    df_long <- df %>%
-      pivot_longer(cols = starts_with("V"), names_to = "draw", values_to = "p") %>%
-      group_by(id_1, draw) %>%
-      summarise(mean_p = mean(p, na.rm = TRUE), .groups = "drop") %>%
-      mutate(t = plot_times[k])
-    
-    region_draws[[k]] <- df_long
-  }
-  
-  df_posterior_timeseries <- bind_rows(region_draws)
   
   # ============================================================
   # Exceedance probability surface: Pr{ p(s,t) > p_thresh }
   # ============================================================
-  # ---- Choose threshold(s) in prevalence units ---
-  p_thresh_list <- c("50" = 0.5, "20" = 0.2 ,"10" = 0.10, "5" = 0.05, "1" = 0.01)
+  p_thresh_list <- c("1" = 0.01, "5" = 0.05, "10" = 0.10)
   
-  # Calculate area km2 per cell
-  lat_mid <- (lat_min + lat_max) / 2
-  # 1 degree lat ≈ 111.32 km and 1 degree lon ≈ 111.32 * cos(latitude)
-  km_per_deg_lat <- 111.32
-  km_per_deg_lon <- 111.32 * cos(lat_mid * pi / 180)
-  dx_deg <- (lon_max - lon_min) / (nx - 1)  # cell width in degrees lon
-  dy_deg <- (lat_max - lat_min) / (ny - 1)  # cell height in degrees lat
-  dx_km <- dx_deg * km_per_deg_lon
-  dy_km <- dy_deg * km_per_deg_lat
-  cell_area_km2 <- dx_km * dy_km
+  exceed_post_p_thresh <- array(
+    NA_real_, dim = c(nx, ny, length(t_vec), length(p_thresh_list))
+  )
   
-  # initalize list for exceedance prob based on Gaussian approx
-  # exceed_post_gaussian_approx_list <- vector("list", length(p_thresh_list))
-  # names(exceed_post_gaussian_approx_list) <- names(p_thresh_list)
-  
-  # initalize list for exceedance prob based on draws
-  exceed_post_draws_list <- vector("list", length(p_thresh_list))
-  names(exceed_post_draws_list) <- names(p_thresh_list)
-  
-  count = 1
-  for (p_thresh in p_thresh_list){
-    z_thresh <- qlogis(p_thresh)
+  count <- 1
+  for (p_thresh in p_thresh_list) {
     
-    # ---- Compute exceedance on the lon/lat grid for plot_times ----
-    #exceed_post_gaussian_approx <- array(NA, dim = c(nx, ny, length(plot_times)))
-    exceed_post_draw <- array(NA_real_, dim = c(nx, ny, length(plot_times)))
+    exceed_post <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
+      mean(x > p_thresh)
+    })
+    exceed_post <- array(exceed_post, dim = c(nx, ny, length(t_vec)))
     
-    for (k in seq_along(plot_times)) {
-      # ============================================================
-      # Exceedance probability: via Gaussian approximation
-      # ============================================================
-      #t_idx <- which(t_vec == plot_times[k])
-      
-      # Mean z on grid from smoothed feature weights
-      #z_mean_vec <- as.numeric(z_init + Phi_full %*% m_w[, t_idx])
-      
-      # Var[z] on grid: diag(Phi_full %*% P_t %*% t(Phi_full))
-      # P_t   <- C_smooth[[t_idx]]                 # smoothed state covariance at time t
-      # PhiP  <- Phi_full %*% P_t                  # [M x 2D]
-      # z_var_vec <- rowSums(PhiP * Phi_full)      # fast diagonal
-      # z_var_vec <- pmax(z_var_vec, 0)            # guard tiny negatives
-      # z_sd_vec  <- sqrt(z_var_vec)
-      # 
-      # Exceedance under Gaussian approx on logit scale:
-      # Pr{p > p_thresh} = Pr{z > z_thresh} = 1 - Phi((z_thresh - mean)/sd)
-      # z_std <- ifelse(z_sd_vec > 0, (z_thresh - z_mean_vec) / z_sd_vec, NA_real_)
-      # exc_vec <- ifelse(
-      #   is.na(z_std),
-      #   as.numeric(z_mean_vec > z_thresh),       # if sd==0, degenerate
-      #   1 - pnorm(z_std)
-      # )
-      
-      #exceed_post_gaussian_approx[, , k] <- matrix(exc_vec, nrow = nx, ncol = ny, byrow = FALSE)
-      
-      # ============================================================
-      # Exceedance probability: via draws
-      # ============================================================
-      Pk <- posterior_draws_list[[k]]            # [M x D] of prevalences from draws
-      theta_hat <- exceed_prob_from_draws(Pk, p_thresh)   # length M
-      exceed_post_draw[ , , k] <- matrix(theta_hat, nrow = nx, ncol = ny, byrow = FALSE)
-    }
-    
-    #exceed_post_gaussian_approx_list[[count]] = exceed_post_gaussian_approx
-    exceed_post_draws_list[[count]] = exceed_post_draw
-    count = count + 1
+    exceed_post_p_thresh[, , , count] <- exceed_post
+    count <- count + 1
   }
   
+  # ============================================================
+  # Calculate mean, median and difference in CI from draws
+  # ============================================================
+  p_post_mean = apply(p_draws, MARGIN = c(1, 2, 3), FUN = mean)
+  p_post_median = apply(p_draws, MARGIN = c(1, 2, 3), FUN = median)
+  p_post_CI <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
+    diff(quantile(x, probs = c(0.025, 0.975)))
+  })
+  
+  # ============================================================
+  # Map grid cells to admin units (unchanged)
+  # ============================================================
+  grid_sf <- st_as_sf(
+    expand.grid(x = xs, y = ys),
+    coords = c("x", "y"),
+    crs = st_crs(admin1_regions)
+  ) %>%
+    mutate(pixel_index = dplyr::row_number())   # index BEFORE join / filtering
+  
+  points_to_regions <- st_join(
+    grid_sf,
+    admin1_regions %>% dplyr::select(id_1, name_0, name_1)
+  ) %>%
+    st_drop_geometry() %>%
+    drop_na(id_1)  
+
+  # ============================================================
   # Create a list of results to save
+  # ============================================================
   model_output <- list(
-    # Essential predictions
-    #p_mean = p_post_mean,
-    #p_lower = p_post_lo,
-    #p_upper = p_post_hi,
-    
-    p_post_mean_draw = p_post_mean_draw,
-    p_post_lower_draw = p_post_lo_draw,
-    p_post_upper_draw = p_post_hi_draw,
+    p_post_mean = p_post_mean,
+    p_post_median = p_post_median,
+    p_post_CI = p_post_CI,
     
     # Grid information
     xs = xs,
@@ -489,27 +555,17 @@ for (mut in all_who_mutations){
     lon_max = lon_max,
     lat_min = lat_min,
     lat_max = lat_max,
-    plot_times = plot_times,
+    t_vec = t_vec,
     
     # Original data
     data_subset = dat_sub,
     
-    # Core model components (optional, for flexibility)
-    weights_mean = m_w,
-    weights_cov = C_smooth,
-    random_frequencies = Omega,
-    
     # Posterior draws
-    num_posterior_draws = n_post_draws,
-    posterior_draws = posterior_draws_list,
-    
-    # Time-series
-    time_series = df_posterior_timeseries,
+    num_posteriors = num_post_draws,
     
     #Exceedance prob
-    # exceed_post_gaussian_approx_list = exceed_post_gaussian_approx_list,
-    exceed_post_draw_list = exceed_post_draws_list,
-    # 
+    exceed_post_list = exceed_post_p_thresh,
+    
     # Model settings
     settings = list(ell_km = ell_km, tau2 = tau2, D = D)
   )
@@ -517,9 +573,7 @@ for (mut in all_who_mutations){
   # Use your cache_path function to create a filename
   output_filename <- cache_path(
     mut = mut, 
-    lenS = ell_km, 
-    lenT = tau2, 
-    what = "full_model_output", 
+    what = "optimized_ell_tau2_full_model_output", 
     ext = "rds"
   )
   

@@ -86,17 +86,60 @@ for (mut in key_mutations){
   p_median <- cached$p_post_median
   
   # --- Summarise posterior by (t, id_1) into median + 95% CI ------------------
-  admin1_time_series_final <- df_posterior_timeseries %>%
+  shape_lookup <- admin1_regions %>%
+    st_drop_geometry() %>%
+    distinct(id_1, name_0, name_1)
+  
+  summ_df <- df_posterior_timeseries %>%
     group_by(t, id_1) %>%
     summarise(
-      lower_ci_bound = quantile(mean_p, probs = 0.025),
+      lower_ci_bound  = quantile(mean_p, probs = 0.025),
       mean_prevalence = quantile(mean_p, probs = 0.5),
-      upper_ci_bound = quantile(mean_p, probs = 0.975),
-      .groups = 'drop'
-    ) %>%
-    left_join(admin1_regions %>% st_drop_geometry() %>% distinct(id_1, name_0, name_1),
-              by = "id_1") %>%
-    filter(t >= min(plot_times), t <= max(plot_times)+1)
+      upper_ci_bound  = quantile(mean_p, probs = 0.975),
+      .groups = "drop"
+    )
+  
+  admin1_time_series_final <- summ_df %>%
+    left_join(shape_lookup, by = "id_1") %>%
+    filter(t >= min(plot_times), t <= max(plot_times) + 1)
+  
+  stopifnot(nrow(admin1_time_series_final) == nrow(summ_df))
+  
+  n_missing <- sum(is.na(admin1_time_series_final$name_0) | is.na(admin1_time_series_final$name_1))
+  if (n_missing > 0) {
+    message("WARNING: ", n_missing, " rows did not match an admin1 region (missing name_0/name_1).")
+    
+    # which id_1 values are missing?
+    missing_ids <- admin1_time_series_final %>%
+      filter(is.na(name_0) | is.na(name_1)) %>%
+      distinct(id_1) %>%
+      arrange(id_1)
+    
+    print(missing_ids)
+    
+    # optional: show a few (t, id_1) examples
+    print(
+      admin1_time_series_final %>%
+        filter(is.na(name_0) | is.na(name_1)) %>%
+        select(t, id_1) %>%
+        arrange(t, id_1) %>%
+        head(20)
+    )
+    
+    # hard fail if you want strictness:
+    stop("Join to admin1_regions failed for some id_1 values.")
+  }
+  
+  # Also check the other direction: shape IDs not present in posterior summary
+  ids_in_post  <- unique(summ_df$id_1)
+  ids_in_shape <- unique(shape_lookup$id_1)
+  
+  missing_in_shape <- setdiff(ids_in_post, ids_in_shape)
+  
+  if (length(missing_in_shape) > 0) {
+    message("Posterior has ", length(missing_in_shape), " id_1 values not present in shape_lookup.")
+    print(head(missing_in_shape, 20))
+  }
   
   # --- Plot only countries where prevalence ever exceeds cutoff ------------
   # which countries ever exceed prev_cutoff at region level
