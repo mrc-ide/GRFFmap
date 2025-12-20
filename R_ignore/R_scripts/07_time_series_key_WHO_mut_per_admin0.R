@@ -60,8 +60,7 @@ admin1_regions <- africa_shp_admin1 |>
 
 # --- K13 Mutations of interests -----------------------------------------------
 key_mutations <- c("k13:622:I", "k13:675:V", "k13:561:H")
-fig5_plots <- list()
-
+all_mut_timeseries <- list()
 # --- Main loop over mutations -------------------------------------------------
 for (mut in key_mutations){
   print(paste0("Processing ", mut, "........."))
@@ -174,6 +173,13 @@ for (mut in key_mutations){
   countries <- levels(adm1_timeseries_bycountry_data$name_0)
   my_colors <- country_colors[countries]
   
+  adm1_timeseries_bycountry_data <- adm1_timeseries_bycountry_data %>%
+    mutate(
+      mean_prevalence = 100 * mean_prevalence,
+      lower_ci_bound  = 100 * lower_ci_bound,
+      upper_ci_bound  = 100 * upper_ci_bound
+    )
+  
   annual_prev_larger_plot_country <- adm1_timeseries_bycountry_data |>
     ggplot(
       aes(
@@ -236,5 +242,13 @@ for (mut in key_mutations){
     height = 3.5
   )
   
-  fig5_plots[[mut]] <- annual_prev_larger_plot_country
+  # Save dataframe
+  adm1_timeseries_bycountry_data <- adm1_timeseries_bycountry_data %>%
+    mutate(mutation = mut)
+  all_mut_timeseries[[mut]] <- adm1_timeseries_bycountry_data
 }
+combined_adm1_timeseries <- dplyr::bind_rows(all_mut_timeseries)
+readr::write_csv(
+  combined_adm1_timeseries,
+  file.path("R_ignore/R_scripts/outputs/plots/", OUT_PLOT_DIR, "adm1_timeseries_bycountry_all_mutations.csv")
+)

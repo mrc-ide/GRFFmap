@@ -28,7 +28,7 @@ t0 <- Sys.time()
 
 # --------------------------- Load & filter data ----------------------------
 VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
-CACHE_DIR <- "R_ignore/R_scripts/outputs/GRFF_kalman_partner_drug_cache_annual_1995_2024/"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
@@ -78,16 +78,15 @@ ny <- 200
 t_vec <- 1995:2024
 t_num <- length(t_vec)
 
+num_post_draws = 100
+
 # plotting parameters
 plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
 
-# posterior draws
-n_post_draws <- 100
-
 # --------------------------- Define PD mutants ----------------------------
 # which mutation we are focusing on
-all_who_mutations <- c("mdr1C:86:Y", "crt:76:T")
-all_who_mutations <- "crt:76:T"
+all_who_mutations <- c("mdr1:86:Y", "crt:76:T")
+all_who_mutations <- "mdr1:86:Y"
 for (mut in all_who_mutations){
   mut_t0 <- Sys.time()  # per-mutation clock stars
   
@@ -131,7 +130,7 @@ for (mut in all_who_mutations){
   g  <- df$gamma
   w <- sqrt(df$np)
   
-  gamma_gauss_nonug <- function(h, psill, range) {
+  gamma_gauss_nonug <- function(h, psill, range, nugget) {
     psill * (1 - exp(-(h / range)^2))   # no nugget term
   }
   
@@ -154,6 +153,38 @@ for (mut in all_who_mutations){
   
   hgrid <- seq(0, max(h), length.out = 500)
   pred  <- gamma_gauss_nonug(hgrid, psill_hat, range_hat)
+  
+  nugget_fix <- 1.67
+
+  gamma_gauss_fixnug <- function(h, psill, range) {
+     nugget_fix + psill * (1 - exp(-(h / range)^2))
+  }
+
+  obj_wls_fixnug <- function(par_log) {
+     psill <- exp(par_log[1])
+     range <- exp(par_log[2])
+     pred  <- gamma_gauss_fixnug(h, psill, range)
+     sum(w * (g - pred)^2)
+  }
+
+  # # starts (partial sill should exclude nugget)
+  psill0 <- max(1e-8, median(g, na.rm = TRUE) - nugget_fix)
+  range0 <- median(h, na.rm = TRUE)
+
+   fit <- optim(
+     par    = log(c(psill0, range0)),
+     fn     = obj_wls_fixnug,
+     method = "Nelder-Mead"
+  )
+
+  psill_hat  <- exp(fit$par[1])
+  range_hat  <- exp(fit$par[2])
+  nugget_hat <- nugget_fix
+
+  ell_km_hat <- range_hat / sqrt(2)
+  ell_km_hat 
+  hgrid <- seq(0, max(h), length.out = 500)
+  pred  <- nugget_fix + psill_hat * (1 - exp(-(hgrid / range_hat)^2))
   
   png(paste0(CACHE_DIR, "/", mut, "_variogram_1year_spatial.png"), width = 6, height = 5, units = "in", res = 300)
   plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
@@ -522,23 +553,6 @@ for (mut in all_who_mutations){
   p_post_CI <- apply(p_draws, MARGIN = c(1, 2, 3), FUN = function(x) {
     diff(quantile(x, probs = c(0.025, 0.975)))
   })
-  
-  # ============================================================
-  # Map grid cells to admin units (unchanged)
-  # ============================================================
-  grid_sf <- st_as_sf(
-    expand.grid(x = xs, y = ys),
-    coords = c("x", "y"),
-    crs = st_crs(admin1_regions)
-  ) %>%
-    mutate(pixel_index = dplyr::row_number())   # index BEFORE join / filtering
-  
-  points_to_regions <- st_join(
-    grid_sf,
-    admin1_regions %>% dplyr::select(id_1, name_0, name_1)
-  ) %>%
-    st_drop_geometry() %>%
-    drop_na(id_1)  
 
   # ============================================================
   # Create a list of results to save

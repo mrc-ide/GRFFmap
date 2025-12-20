@@ -34,7 +34,7 @@ dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
 dat_with_k13 <- add_combined_k13(dat)
 
 # --- Parameters ---------------------------------------------------------------
-plot_times <- seq(2012, 2023, by = 1)
+plot_times <- seq(2012, 2024, by = 1)
 t_vec <- 1995:2025
 t_num <- length(t_vec)
 
@@ -59,12 +59,8 @@ x_range     <- c(-20, 55)  # lon extent used to subset points
 y_range     <- c(-35, 38)  # not used below, but kept for reference
 plot_crs = 4326
 
-all_who_mutations <- c(
-  "k13:comb","k13:622:I", "k13:469:Y", "k13:675:V", "k13:446:I", "k13:458:Y", 
-  "k13:476:I",   "k13:493:H", "k13:539:T", "k13:543:T",  "k13:553:L", 
-  "k13:561:H",   "k13:574:L", "k13:580:Y", "k13:441:L", "k13:449:A", 
-  "k13:469:F",   "k13:481:V", "k13:515:K", "k13:527:H",  "k13:537:I", 
-  "k13:537:D", "k13:538:V",  "k13:568:G")
+all_who_mutations <- c("k13:comb", "k13:675:V", "k13:622:I", "k13:469:Y", "k13:561:H", "k13:574:L", 
+                       "k13:441:L", "k13:449:A", "k13:469:F")
 
 area_ts_list <- list()
 for (mut in all_who_mutations){
@@ -174,7 +170,7 @@ p_area_p5 <- ggplot(area_ts_all,
   labs(
     x = "Year",
     y = expression(
-      "Area with " ~ Pr(prev >= 5*"%") >= 80*"% (km"^2*")"
+      "Area with " ~ Pr(prev >= 5*"%") > 80*"% (km"^2*")"
     ),
     color = "Mutation",
     title = "Total high-prevalence area over time (5% prevalence threshold)"

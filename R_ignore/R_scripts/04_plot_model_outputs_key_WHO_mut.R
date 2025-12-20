@@ -25,7 +25,7 @@ t_num <- length(t_vec)
 # plotting parameters
 plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 
-# --- Load & filter data -------------------------------------------------------
+# --- Define paths -------------------------------------------------------
 CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
 
 OUT_DIR <- "R_ignore/R_scripts/outputs/plots/key_k13_mutations"
@@ -36,6 +36,7 @@ OUT_MEDIAN_DIR   <- file.path("key_k13_mutations", "median_prev_prediction_avg_2
 OUT_CI_DIR   <- file.path("key_k13_mutations", "CI_diff_prediction_avg_2_year")
 OUT_EXCEED_DIR <- file.path("key_k13_mutations", "exceedance_prob_avg_2_year")
 
+# --- Load data -------------------------------------------------------
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_MEAN_DIR),
              paste0("R_ignore/R_scripts/outputs/plots/", OUT_MEDIAN_DIR),
              paste0("R_ignore/R_scripts/outputs/plots/", OUT_CI_DIR),
@@ -67,31 +68,18 @@ CRS_METRIC <- sf::st_crs(3857)  # planar for buffers/ops
 shape_Africa_ll <- shape_Africa |> sf::st_transform(CRS_LL)
 shape_water_ll  <- shape_water  |> sf::st_transform(CRS_LL)
 
-# --- Define color scheme ------------------------------
-pp_cols<- c(
-  "#5E3A9B",  # dark purple (0)
-  "#8cc4e0",  # medium-dark blue
-  "#a8ecbf",  # mint-teal
-  "palegreen3", # <-- ADDED GREEN
-  "khaki2",
-  "#f3c86b",
-  "orange",
-  "hotpink",   # <-- ADDED PINK
-  "red",      
-  "darkred"    
-)
-
-pp_vals <- rescale(c(0, 1, 5, 10, 20, 30, 50, 70, 90, 95 , 100))
-
 # --- Loop over each mutation ------------------------------
 for (mut in all_who_mutations){
   message("Processing ", mut)
+  
+  # Define clean version of mutation
   clean_mut <- paste0("k13 ", gsub("^k13:(\\d+):([A-Za-z])$", "\\1\\2", mut))
   
   if (mut == "k13:comb"){
     clean_mut = ""
   }
   
+  # Filter data
   dat_sub <- dat_with_k13 |>
     filter(mutation == mut) |>
     filter(is.finite(numerator), is.finite(denominator), denominator > 0,
