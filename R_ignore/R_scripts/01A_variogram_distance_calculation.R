@@ -28,7 +28,7 @@ t0 <- Sys.time()
 
 # --- Define K13 mutants -------------------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
-mut <- "mdr1:86:Y"
+mut <- args[1]
 # "crt:76:T"
 # "mdr1:86:Y"
 
@@ -39,10 +39,12 @@ mut_t0 <- Sys.time()
 CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
 dir_create(CACHE_DIR)
 
+VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
+
 # Read in prevalence data
 dat <- read.csv("R_ignore/R_scripts/data/all_mutations_get_prevalence.csv") |>
   mutate(collection_day = as.Date(collection_day)) |>
-  select(survey_id, study_id, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
+  select(survey_id, study_id, collection_day, longitude, latitude, year, country_name, numerator, denominator, prevalence, mutation) 
 
 # --- Add K13 overall data -----------------------------------------------------
 dat_with_k13 <- add_combined_k13(dat)
@@ -88,7 +90,7 @@ dat_sub$Ykm <- xy_km[, 2]
 sp_pts <- sp::SpatialPoints(dat_sub[, c("Xkm", "Ykm")])
 
 # Create time index where time is treated as numeric across all years in dat_sub
-time_idx <- as.POSIXct(paste0(dat_sub$year, "-07-01"), tz = "UTC")
+time_idx <- as.POSIXct(dat_sub$collection_day, tz = "UTC")
 
 # Combine spatial points + time index + observed values into a spacetime object
 st_obj <- spacetime::STIDF(sp_pts, time_idx, data = data.frame(z = dat_sub$z))
@@ -173,3 +175,125 @@ saveRDS(vg_t, file.path(CACHE_DIR, paste0(mut, "_variogram_distance_time.rds")))
 total_elapsed <- Sys.time() - mut_t0
 message(sprintf("Total elapsed: %.2f min",
                 as.numeric(total_elapsed, units = "mins")))
+
+# ==============================================================================
+# Variogram analysis to identify optimal length space parameter (ell_km) 
+# and temporal variance (tau2)
+# ==============================================================================
+
+# --- Spatial variogram to estimate the spatial length-scale ell_km ------------
+# vg_1y_sp <- readRDS(file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_distance_space.rds")))
+
+df <- subset(vg_1y_sp, is.finite(dist) & is.finite(gamma) & dist > 0)
+h  <- df$dist
+g  <- df$gamma
+w <- sqrt(df$np)
+
+# nugget_fix <- 0.1
+
+# gamma_gauss_fixnug <- function(h, psill, range) {
+#   nugget_fix + psill * (1 - exp(-(h / range)^2))
+# }
+
+# obj_wls_fixnug <- function(par_log) {
+#   psill <- exp(par_log[1])
+#   range <- exp(par_log[2])
+#   pred  <- gamma_gauss_fixnug(h, psill, range)
+#   sum(w * (g - pred)^2)
+# }
+
+# # starts (partial sill should exclude nugget)
+# psill0 <- max(1e-8, median(g, na.rm = TRUE) - nugget_fix)
+# range0 <- median(h, na.rm = TRUE)
+
+# fit <- optim(
+#   par    = log(c(psill0, range0)),
+#   fn     = obj_wls_fixnug,
+#   method = "Nelder-Mead"
+# )
+
+# psill_hat  <- exp(fit$par[1])
+# range_hat  <- exp(fit$par[2])
+# nugget_hat <- nugget_fix
+
+# ell_km_hat <- range_hat / sqrt(2)
+
+# hgrid <- seq(0, max(h), length.out = 500)
+# pred  <- nugget_fix + psill_hat * (1 - exp(-(hgrid / range_hat)^2))
+
+gamma_gauss_nonug <- function(h, psill, range) {
+  psill * (1 - exp(-(h / range)^2))   # no nugget term
+}
+
+obj_wls_nonug <- function(par_log) {
+  psill <- exp(par_log[1])
+  range <- exp(par_log[2])
+  pred  <- gamma_gauss_nonug(h, psill, range)
+  sum(w * (g - pred)^2)
+}
+
+# starts
+psill0 <- max(1e-8, median(g, na.rm=TRUE))   # no need to subtract nugget
+range0 <- median(h, na.rm=TRUE)
+
+fit <- optim(log(c(psill0, range0)), obj_wls_nonug, method="Nelder-Mead")
+
+psill_hat <- exp(fit$par[1])
+range_hat <- exp(fit$par[2])
+ell_km_hat <- range_hat / sqrt(2)
+
+hgrid <- seq(0, max(h), length.out = 500)
+pred  <- gamma_gauss_nonug(hgrid, psill_hat, range_hat)
+
+png(paste0(CACHE_DIR, "/", mut, "_variogram_1year_spatial.png"), width = 6, height = 5, units = "in", res = 300)
+plot(g ~ h, xlab="Distance (km)", ylab="Semivariance", pch=1)
+lines(hgrid, pred, lwd=2)
+dev.off()
+
+message("Estimated length-scale ell_km = ", ell_km_hat)
+
+# --- Temporal variogram to estimate RW1 variance (tau^2) ----------------------
+
+# vg_t <- readRDS(file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_distance_time.rds")))
+
+# Estimate RW variance via weighted linear regression (model: gamma(h) = 0.5 * tau^2 * h)
+lm_rw0 <- lm(gamma ~ 0 + dist, data = vg_t, weights = np)
+
+# Estimated slope
+b_hat <- coef(lm_rw0)[["dist"]]   # slope
+
+# Convert slope to RW variance parameter
+tau2_hat_day <- 2 * b_hat
+tau2_hat <- tau2_hat_day * 365
+
+# Final plot with fitted line
+png(paste0(CACHE_DIR, "/", mut, "_temporal_variogram_rw_fit.png"), width = 6, height = 5, units = "in", res = 300)
+plot(
+  gamma ~ dist,
+  data = vg_t,
+  xlab = "Time lag (days)",
+  ylab = "Semivariance",
+  main = "Temporal variogram with RW fit (intercept fixed at 0)"
+)
+# Fitted RW line: gamma(h) = b_hat * h
+abline(a = 0, b = b_hat, lwd = 2)
+dev.off()
+
+message("Estimated RW1 variance tau2 = ", tau2_hat)
+
+# Collect fitted hyperparameters
+hyperparams <- list(
+  mutation      = mut,
+  ell_km        = ell_km_hat,
+  tau2_year     = tau2_hat,
+  tau2_day      = tau2_hat_day,
+  psill         = psill_hat,
+  range_km      = range_hat,
+  fitted_at     = Sys.time()
+)
+
+# Save as RDS
+saveRDS(
+  hyperparams,
+  file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_hyperparams.rds"))
+)
