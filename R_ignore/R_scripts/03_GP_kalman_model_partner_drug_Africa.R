@@ -86,7 +86,6 @@ plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
 # --------------------------- Define PD mutants ----------------------------
 # which mutation we are focusing on
 all_who_mutations <- c("mdr1:86:Y", "crt:76:T")
-all_who_mutations <- "mdr1:86:Y"
 for (mut in all_who_mutations){
   mut_t0 <- Sys.time()  # per-mutation clock stars
   
