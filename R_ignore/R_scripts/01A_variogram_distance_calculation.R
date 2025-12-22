@@ -90,8 +90,11 @@ dat_sub$Ykm <- xy_km[, 2]
 sp_pts <- sp::SpatialPoints(dat_sub[, c("Xkm", "Ykm")])
 
 # Create time index where time is treated as numeric across all years in dat_sub
-time_idx <- as.POSIXct(dat_sub$collection_day, tz = "UTC")
-
+if (mut == "k13:comb"){
+  time_idx <- as.POSIXct(paste0(dat_sub$year, "-07-01"), tz = "UTC")
+} else {
+  time_idx <- as.POSIXct(dat_sub$collection_day, tz = "UTC")
+}
 # Combine spatial points + time index + observed values into a spacetime object
 st_obj <- spacetime::STIDF(sp_pts, time_idx, data = data.frame(z = dat_sub$z))
 
