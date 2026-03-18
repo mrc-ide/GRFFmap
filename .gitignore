@@ -5,3 +5,4 @@
 .RDataTmp
 .RDataTmp1
 R_ignore/R_scripts/outputs/GRFF_kalman_cache_annual/
+R_ignore/R_scripts/outputs/model_outputs/variogram_distances/
