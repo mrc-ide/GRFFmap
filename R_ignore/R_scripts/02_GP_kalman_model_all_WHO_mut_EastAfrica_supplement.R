@@ -32,13 +32,11 @@ t0 <- Sys.time()
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-ell_km <- 57.2815967665492         # RFF length-scale in **kilometres**
-tau2   <- 0.275542312057704        # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 1500         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
@@ -63,7 +61,7 @@ q_thr <- 0.80   # probability threshold for exceedance probability
 bootstrap    <- 500    # bootstrap resamples
 
 # --- Load & filter data ----------------------------
-
+VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
 CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
 dir_create(CACHE_DIR)
 
@@ -143,6 +141,18 @@ xy_m <- st_coordinates(pts_xy)
 xy_km <- xy_m / 1000
 dat_sub$Xkm <- xy_km[, 1]
 dat_sub$Ykm <- xy_km[, 2]
+
+# ==============================================================================
+# Load spatial and temporal parameters
+# ==============================================================================
+
+# --- Spatial variogram to estimate the spatial length-scale ell_km ------------
+vg_hyperparameters <- readRDS(file.path(VARIOGRAM_DIR, paste0("k13:comb_variogram_hyperparams.rds")))
+
+ell_km <- as.numeric(vg_hyperparameters$ell_km)
+tau2   <- as.numeric(vg_hyperparameters$tau2_year)
+
+message("tau2 = ", tau2, "and ell_km = ", ell_km)
 
 # ==============================================================================
 # Spatiotemporal model

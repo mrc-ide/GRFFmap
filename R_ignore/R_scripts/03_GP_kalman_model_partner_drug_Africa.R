@@ -65,7 +65,7 @@ lat_max <- bbox_info$ylim[2]
 
 # --------------------------- Settings --------------------------------------
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 1500         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
