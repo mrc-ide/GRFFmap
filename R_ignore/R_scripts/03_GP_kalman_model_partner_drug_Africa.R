@@ -28,7 +28,7 @@ t0 <- Sys.time()
 
 # --------------------------- Load & filter data ----------------------------
 VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations_D1000"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
@@ -70,8 +70,6 @@ max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
 jitter_S <- 1e-10       # diagonal jitter for innovation covariance
-ell_km <- 408           # RFF length-scale in **kilometres** #80 for k13
-tau2   <- 1           # RW1 variance in feature space
 p_init <- 0.001         
 z_init <- qlogis(p_init)
 
@@ -90,12 +88,15 @@ plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
 args <- commandArgs(trailingOnly = TRUE)
 mut <- args[[1]]
 
+print(mut)
+
 mut_t0 <- Sys.time()  # per-mutation clock stars
 
 # --------------------------- Run spatiotemporal ----------------------------
 dat_sub <- dat |>
   filter(mutation == mut) |>
   filter(is.finite(numerator), is.finite(denominator), denominator > 0)
+print(dim(dat_sub))
 
 # --- Project to local Cartesian (km) ------------------------------------------
 # Center projection on study area for good local properties
@@ -122,8 +123,8 @@ dat_sub$Ykm <- xy_km[, 2]
 # ==============================================================================
 # Extract optimized hyperparameters
 # ==============================================================================
-# ell_km    <- hyperparams$ell_km
-# tau2 <- hyperparams$tau2_year
+ell_km    <- hyperparams$ell_km
+tau2 <- hyperparams$tau2_year
 
 message("Optimal parameters are. tau2 = ", tau2, "and ell_km = ", ell_km)
 

@@ -34,13 +34,11 @@ t0 <- Sys.time()
 
 # --- Settings -----------------------------------------------------------------
 # model parameters
-# ell_km <- 120          # RFF length-scale in **kilometres**
-# tau2   <- 0.5         # RW1 variance in feature space
 p_init <- 0.001
 z_init <- qlogis(p_init)
 
 # inference parameters
-D        <- 1500         # number of random frequencies (try 200–500)
+D        <- 1000         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
@@ -65,7 +63,7 @@ bootstrap    <- 500    # bootstrap resamples
 
 # --------------------------- Load & filter data ----------------------------
 VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations_D1000"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data
