@@ -29,7 +29,6 @@ t0 <- Sys.time()
 # --- Define K13 mutants -------------------------------------------------------
 args <- commandArgs(trailingOnly = TRUE)
 mut <- args[1]
-mut <- "k13:comb"
 # "crt:76:T"
 # "mdr1:86:Y"
 
@@ -231,7 +230,6 @@ hyperparams <- list(
   mutation      = mut,
   ell_km        = ell_km_hat,
   tau2_year     = tau2_hat,
-  tau2_day      = tau2_hat_day,
   psill         = psill_hat,
   range_km      = range_hat,
   fitted_at     = Sys.time()

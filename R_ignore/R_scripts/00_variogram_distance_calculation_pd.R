@@ -232,7 +232,6 @@ hyperparams <- list(
   mutation      = mut,
   ell_km        = ell_km_hat,
   tau2_year     = tau2_hat,
-  tau2_day      = tau2_hat_day,
   psill         = psill_hat,
   range_km      = range_hat,
   fitted_at     = Sys.time()
@@ -241,4 +240,3 @@ hyperparams <- list(
 # Save as RDS
 saveRDS(hyperparams, file.path(VARIOGRAM_DIR, paste0(mut, "_variogram_hyperparams.rds")))
 saveRDS(spatial_vg_plot_data,  file.path(VARIOGRAM_DIR, paste0(mut, "_spatial_vg_plot_data.rds")))
-saveRDS(temporal_vg_plot_data, file.path(VARIOGRAM_DIR, paste0(mut, "_temporal_vg_plot_data.rds")))
