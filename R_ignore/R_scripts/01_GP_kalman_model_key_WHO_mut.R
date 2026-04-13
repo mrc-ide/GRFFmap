@@ -53,7 +53,7 @@ t_num <- length(t_vec)
 plot_times <- seq(2012, 2025, by = 1)
 
 # posterior draws
-num_post_draws <- 1000 
+num_post_draws <- 500 
 
 # parameters for exceedance plot
 cell_size_km <- 5

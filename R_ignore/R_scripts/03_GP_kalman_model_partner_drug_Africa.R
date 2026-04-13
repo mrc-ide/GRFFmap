@@ -28,7 +28,7 @@ t0 <- Sys.time()
 
 # --------------------------- Load & filter data ----------------------------
 VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations_D1000"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations_1000D"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
@@ -65,7 +65,7 @@ lat_max <- bbox_info$ylim[2]
 
 # --------------------------- Settings --------------------------------------
 # inference parameters
-D        <- 500         # number of random frequencies (try 200–500)
+D        <- 1000         # number of random frequencies (try 200–500)
 max_iter <- 5           # EM iterations
 z_eps    <- 1e-6        # threshold for |z| to use n/4 in E[ω]
 omega_floor <- 1e-10    # floor on ω to avoid 1/ω explosions
@@ -79,7 +79,7 @@ ny <- 200
 t_vec <- 1995:2024
 t_num <- length(t_vec)
 
-num_post_draws = 100
+num_post_draws = 500
 
 # plotting parameters
 plot_times <- seq(1995, 2024, by = 1) # should be within t_vec
