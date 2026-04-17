@@ -14,7 +14,7 @@ suppressPackageStartupMessages({
 load_all()
 
 # --- Paths & constants -----------------------------------------------------------
-CACHE_DIR      <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations/"
+CACHE_DIR      <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
 OUT_BASE       <- "GRFF_updated_maps"
 OUT_PLOT_DIR <- "total_speed_spread"
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_PLOT_DIR)))
@@ -167,6 +167,9 @@ p_area_p5 <- ggplot(area_ts_all,
   geom_line(linewidth = 1) +
   geom_point(size = 2) +
   scale_x_continuous(breaks = sort(unique(area_ts_all$year))) +
+  scale_y_continuous(
+    labels = scales::label_comma()
+  ) +
   labs(
     x = "Year",
     y = expression(

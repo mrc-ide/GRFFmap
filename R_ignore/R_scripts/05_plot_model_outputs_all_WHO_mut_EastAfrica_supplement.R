@@ -1,4 +1,4 @@
-# ── Packages ────────────────────────────────────────────────────────────────────
+# --- Packages -----------------------------------------------------------------
 suppressPackageStartupMessages({
   library(tidyverse)
   library(sf)
@@ -29,7 +29,7 @@ t_num <- length(t_vec)
 plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 
 # --- Load & filter data -------------------------------------------------------
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations/"
 
 OUT_COMBINED <- file.path("supplemental", "combined_pred_prev_exceedance_prob_grouped_year_kalman")
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_COMBINED)), 
@@ -236,7 +236,7 @@ for (mut in all_who_mutations){
     ) +
       theme(plot.margin = margin(t = 0,  r = 2, b = -5, l = 2, unit = "pt"))
     
-    plot_CI_no_title <- plot_prev_layer(
+    plot_CI_no_title <- plot_CI_layer(
       p_long_df   = p_long_CI,
       title_text  = "",
       shp         = shape_Africa_crop,

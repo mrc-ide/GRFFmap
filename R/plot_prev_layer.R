@@ -82,6 +82,7 @@ plot_prev_layer <- function(p_long_df,
                             title_text, 
                             shp = shape_Africa, 
                             shp_water = shape_water, 
+                            shp_non_malaria = NULL,
                             lims,
                             facet_n_row = 1,
                             x_axis_break = 5,
@@ -104,8 +105,22 @@ plot_prev_layer <- function(p_long_df,
   p <- ggplot() +
     geom_raster(aes(x = x, y = y, fill = p*100), data = p_long_df) +
     geom_sf(data = shp, linewidth = 0.2, fill = NA, color = "white") +
-    geom_sf(data = shp_water, fill = "white", colour = NA) +
-    facet_wrap(~t, nrow = facet_n_row) +
+    geom_sf(data = shp_water, fill = "white", colour = NA)
+  
+  # Optional grey out non endemic malaria countries
+  if (!is.null(shp_non_malaria) && nrow(shp_non_malaria) > 0) {
+    p <- p + geom_sf(data = shp_non_malaria, fill = "grey80", colour = NA)  +
+      theme(
+        panel.background = element_rect(fill = "white", colour = NA),
+        plot.background  = element_rect(fill = "white", colour = NA),
+        legend.background = element_rect(fill = "white", colour = NA),
+        legend.key        = element_rect(fill = "white", colour = NA),
+        strip.background  = element_rect(fill = "white", colour = NA),
+        strip.placement   = "outside"
+      )
+  }
+  
+  p <- p + facet_wrap(~t, nrow = facet_n_row) +
     coord_sf(
       xlim = c(xmin, xmax),
       ylim = c(ymin, ymax),

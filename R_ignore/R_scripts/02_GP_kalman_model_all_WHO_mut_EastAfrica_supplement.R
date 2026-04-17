@@ -1,12 +1,6 @@
 # ============================================================
 # RFF + PG-EM with Kalman filter/RTS in projected (Cartesian) coords
 # ============================================================
-# - Reads WHO GET prevalence data
-# - Filters to a mutation and spatial window
-# - Projects lon/lat -> local LAEA (km), runs RFF + PG-EM in km
-# - Reconstructs prevalence on a lon/lat grid for plotting
-# - Overlays observations with an in-window/out-of-window styling
-# ============================================================
 
 # Load libraries
 library(tidyverse)

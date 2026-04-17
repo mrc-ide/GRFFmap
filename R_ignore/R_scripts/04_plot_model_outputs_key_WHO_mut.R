@@ -28,13 +28,12 @@ plot_times <- seq(2012, 2023, by = 1) # should be within t_vec
 # --- Define paths -------------------------------------------------------
 CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_key_WHO_mutations"
 
-OUT_DIR <- "R_ignore/R_scripts/outputs/plots/key_k13_mutations"
-dir_create(OUT_DIR)
+OUT_DIR <- "key_k13_mutations"
 
-OUT_MEAN_DIR   <- file.path("key_k13_mutations", "mean_prev_prediction_avg_2_year")
-OUT_MEDIAN_DIR   <- file.path("key_k13_mutations", "median_prev_prediction_avg_2_year")
-OUT_CI_DIR   <- file.path("key_k13_mutations", "CI_diff_prediction_avg_2_year")
-OUT_EXCEED_DIR <- file.path("key_k13_mutations", "exceedance_prob_avg_2_year")
+OUT_MEAN_DIR   <- file.path(OUT_DIR, "mean_prev_prediction_avg_2_year")
+OUT_MEDIAN_DIR   <- file.path(OUT_DIR, "median_prev_prediction_avg_2_year")
+OUT_CI_DIR   <- file.path(OUT_DIR, "CI_diff_prediction_avg_2_year")
+OUT_EXCEED_DIR <- file.path(OUT_DIR, "exceedance_prob_avg_2_year")
 
 # --- Load data -------------------------------------------------------
 dir_create(c(paste0("R_ignore/R_scripts/outputs/plots/", OUT_MEAN_DIR),
@@ -54,10 +53,11 @@ shape_water  <- sf::st_read("R_ignore/R_scripts/data/shapefiles/africa_water_bod
 dat_with_k13 <- add_combined_k13(dat)
 
 # --------------------------- Define Mutations ----------------------------
-all_who_mutations <- c("k13:comb", 
-                       "k13:675:V", 
-                       "k13:622:I", 
-                       "k13:561:H")
+all_who_mutations <- c(
+  # "k13:comb", 
+  # "k13:675:V", 
+  # "k13:622:I", 
+  "k13:561:H")
 # Note for Cecile: the following mutations have a wide grid where prev > 0:
 # 441L, 449A, 469F, 473I, 539T, 553L, 561H, 568G, 574L, 622I
 
@@ -303,7 +303,7 @@ for (mut in all_who_mutations){
     add_legend  = TRUE
   )
   
-  plot_CI <- plot_prev_layer(
+  plot_CI <- plot_CI_layer(
     p_long_df   = p_long_CI_avg_2y, 
     title_text  = clean_mut,
     shp         = shape_Africa_crop,
@@ -316,7 +316,7 @@ for (mut in all_who_mutations){
     add_legend = TRUE
     )
   
-  plot_CI_no_points <- plot_prev_layer(
+  plot_CI_no_points <- plot_CI_layer(
     p_long_df   = p_long_CI_avg_2y, 
     title_text  = clean_mut,
     shp         = shape_Africa_crop,

@@ -242,7 +242,7 @@ for (mut in all_pd_mutations){
     add_legend  = TRUE
   )
   
-  plot_binned_year_CI <- plot_prev_layer(
+  plot_binned_year_CI <- plot_CI_layer(
     p_long_df   = p_long_CI_avg_2y, 
     title_text  = clean_mut,
     shp         = shape_Africa_crop,
@@ -257,7 +257,7 @@ for (mut in all_pd_mutations){
     add_legend = TRUE
   )
   
-  plot_binned_year_CI_no_points <- plot_prev_layer(
+  plot_binned_year_CI_no_points <- plot_CI_layer(
     p_long_df   = p_long_CI_avg_2y, 
     title_text  = clean_mut,
     shp         = shape_Africa_crop,
