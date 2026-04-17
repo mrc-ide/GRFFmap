@@ -50,13 +50,12 @@
 #' }
 #'
 #' @note
-#' This function assumes that global variables \code{nx} and \code{ny}
-#' are defined and consistent with \code{length(xs)} and \code{length(ys)}.
-#' For safer reuse, consider computing \code{nx <- length(xs)} and
-#' \code{ny <- length(ys)} inside the function.
 #'
 #' @export
 make_raster_long <- function(arr3, xs, ys, times) {
+  nx <- length(xs)
+  ny <- length(ys)
+  
   do.call(rbind, lapply(seq_along(times), function(k) {
     data.frame(
       x = rep(xs, times = ny),
