@@ -2,14 +2,16 @@
 # Time-Series Plot of Admin-1 Prevalence from GRFF Kalman Output
 # ===============================================================
 
-library(tidyverse)
-library(Matrix)
-library(here)
-library(sf)
-library(devtools)
-library(fs)
-library(ggrepel)
-library(cowplot)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(Matrix)
+  library(here)
+  library(sf)
+  library(devtools)
+  library(fs)
+  library(ggrepel)
+  library(cowplot)
+})
 
 load_all()
 sf_use_s2(FALSE)

@@ -3,7 +3,6 @@ suppressPackageStartupMessages({
   library(tidyverse)
   library(sf)
   library(fs)
-  library(arrow)       # optional but nice for big cached tables
   library(devtools)
   library(dplyr)
   library(fs)

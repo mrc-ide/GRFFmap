@@ -1,13 +1,15 @@
 #---------------Summary Stats for Modeling Output-------------------------------
-library(tidyverse)
-library(Matrix)
-library(here)
-library(sf)
-library(devtools)
-library(dplyr)
-library(fs)
-library(here)
-library(lwgeom) 
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(Matrix)
+  library(here)
+  library(sf)
+  library(devtools)
+  library(dplyr)
+  library(fs)
+  library(here)
+  library(lwgeom)
+})
 
 load_all()
 

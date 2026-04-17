@@ -2,8 +2,9 @@
 # Plotting variogram 
 # ============================================================
 
-
-library(ggplot2)
+suppressPackageStartupMessages({
+  library(ggplot2)
+})
 
 load_all()
 
