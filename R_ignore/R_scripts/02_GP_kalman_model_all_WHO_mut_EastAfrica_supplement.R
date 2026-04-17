@@ -56,7 +56,7 @@ bootstrap    <- 500    # bootstrap resamples
 
 # --- Load & filter data ----------------------------
 VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations_D1000"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/supplemental/GRFF_model_output_all_WHO_mutations"
 dir_create(CACHE_DIR)
 
 # Read in prevalence data

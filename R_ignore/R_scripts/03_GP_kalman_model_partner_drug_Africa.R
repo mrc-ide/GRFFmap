@@ -22,7 +22,7 @@ t0 <- Sys.time()
 
 # --------------------------- Load & filter data ----------------------------
 VARIOGRAM_DIR <- "R_ignore/R_scripts/outputs/model_outputs/variogram_distances"
-CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations_1000D"
+CACHE_DIR <- "R_ignore/R_scripts/outputs/model_outputs/GRFF_model_output_parter_drug_mutations"
 dir_create(CACHE_DIR)
 
 # read in prevalence data
