@@ -51,7 +51,7 @@ The structure within analysis is as follows:
 ### Licenses
 
 Code: [MIT](http://opensource.org/licenses/MIT) year: 2024, copyright
-holder: OJ Watson
+holder: Robert Verity
 
 Data: [CC-0](http://creativecommons.org/publicdomain/zero/1.0/)
 attribution requested in reuse
