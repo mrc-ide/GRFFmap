@@ -7,7 +7,8 @@ This project uses a Gaussian Process (GP)-based spatial-temporal model to estima
 Resistance marker prevalence is modeled as a latent GP on a 2D spatial domain evolving over discrete yearly time steps. Observed data are binomial counts (mutant alleles out of total sequenced samples) linked to the latent field via a logistic transformation.
 
 ### Key Components
-Spatial representation — The spatial covariance follows a squared exponential kernel, approximated using Random Fourier Features (RFF) to reduce computational cost from O(N³) to a tractable linear operation. The latent logit-prevalence field is expressed as a linear combination of these features.
+#### Spatial representation 
+The spatial covariance follows a squared exponential kernel, approximated using Random Fourier Features (RFF) to reduce computational cost from O(N³) to a tractable linear operation. The latent logit-prevalence field is expressed as a linear combination of these features.
 #### Temporal evolution 
 Temporal dynamics are modeled as a Gaussian random walk over the RFF coefficients, forming a linear state-space model. This keeps computation linear in the number of time points O(T).
 #### Inference 
